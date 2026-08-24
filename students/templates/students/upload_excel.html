@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Marks & Attendance Data</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+        }
+        .upload-card {
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            background: #1e293b;
+        }
+        .drop-zone {
+            border: 2px dashed #3b82f6;
+            border-radius: 12px;
+            padding: 40px 20px;
+            text-align: center;
+            background-color: rgba(15, 23, 42, 0.6);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .drop-zone:hover, .drop-zone.dragover {
+            background-color: rgba(59, 130, 246, 0.1);
+            border-color: #60a5fa;
+        }
+        .drop-zone-icon {
+            font-size: 3rem;
+            color: #3b82f6;
+            margin-bottom: 12px;
+        }
+        .btn-custom {
+            padding: 12px 24px;
+            font-weight: 600;
+            border-radius: 8px;
+        }
+        .sheet-badge {
+            font-size: 0.825rem;
+            background-color: rgba(255, 255, 255, 0.05);
+            color: #cbd5e1;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 6px;
+            padding: 6px 12px;
+        }
+        .schema-box {
+            background-color: rgba(15, 23, 42, 0.8);
+            border-left: 4px solid #10b981;
+            border-radius: 4px;
+            padding: 12px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container py-5">
+    <div class="row justify-content-center">
+        <div class="col-md-8 col-lg-6">
+            <div class="card upload-card p-4 p-md-5">
+                
+                <!-- Header -->
+                <div class="text-center mb-4">
+                    <div class="d-inline-flex align-items-center justify-content-center bg-primary bg-opacity-20 text-primary rounded-circle mb-3" style="width: 60px; height: 60px;">
+                        <i class="fa-solid fa-file-excel fa-2xl"></i>
+                    </div>
+                    <h3 class="fw-bold mb-1 text-white">Import Academic & Attendance Data</h3>
+                    <p class="text-secondary small">Upload master Excel workbooks to sync subject structures, student marks, and attendance matrices.</p>
+                </div>
+
+                <!-- Django Messages -->
+                {% if messages %}
+                    {% for message in messages %}
+                        <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show bg-opacity-20 border-0" role="alert">
+                            {% if message.tags == 'success' %}
+                                <i class="fa-solid fa-circle-check me-2 text-success"></i>
+                            {% elif message.tags == 'error' %}
+                                <i class="fa-solid fa-triangle-exclamation me-2 text-danger"></i>
+                            {% else %}
+                                <i class="fa-solid fa-circle-info me-2 text-info"></i>
+                            {% endif %}
+                            <span class="text-white">{{ message }}</span>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+
+                <!-- Required Tabs Information -->
+                <div class="mb-4">
+                    <label class="form-label text-secondary fw-semibold small mb-2 text-uppercase tracking-wider">Required Workbook Sheets:</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        <span class="sheet-badge"><i class="fa-solid fa-table-list text-primary me-1"></i> 1. Subject_Structure</span>
+                        <span class="sheet-badge"><i class="fa-solid fa-user-graduate text-info me-1"></i> 2. Student_Marks</span>
+                        <span class="sheet-badge"><i class="fa-solid fa-calendar-check text-success me-1"></i> 3. Attendance</span>
+                    </div>
+                </div>
+
+                <!-- Schema Guidance Note -->
+                <div class="schema-box mb-4">
+                    <div class="d-flex align-items-center mb-1">
+                        <i class="fa-solid fa-lightbulb text-warning me-2"></i>
+                        <span class="fw-bold text-white small">Attendance Sheet Requirements:</span>
+                    </div>
+                    <p class="text-secondary small mb-0">
+                        Ensure sheet #3 is named <code>Attendance</code> with headers: 
+                        <code class="text-info">Roll_Number</code>, <code class="text-info">Attended_Classes</code>, <code class="text-info">Total_Classes</code>.
+                    </p>
+                </div>
+
+                <!-- Upload Form -->
+                <form method="POST" action="{% url 'students:upload_excel' %}" enctype="multipart/form-data" id="uploadForm">
+                    {% csrf_token %}
+
+                    <div class="drop-zone mb-3" id="dropZone">
+                        <i class="fa-solid fa-cloud-arrow-up drop-zone-icon"></i>
+                        <p class="mb-1 fw-semibold text-white" id="dropZoneText">Click or drag & drop Excel workbook here</p>
+                        <span class="text-secondary small">Supported formats: .xlsx, .xls (Max 15MB)</span>
+                        <input type="file" name="excel_file" id="fileInput" accept=".xlsx, .xls" required class="d-none">
+                    </div>
+
+                    <!-- File Info Banner (Hidden initially) -->
+                    <div class="alert alert-dark border border-secondary d-flex align-items-center justify-content-between mb-4 d-none" id="fileDetails">
+                        <div class="d-flex align-items-center text-truncate">
+                            <i class="fa-solid fa-file-excel text-success me-2 fa-lg"></i>
+                            <span class="fw-semibold text-white text-truncate" id="fileName">filename.xlsx</span>
+                        </div>
+                        <button type="button" class="btn-close btn-close-white ms-2" id="removeFileBtn" aria-label="Remove"></button>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary btn-custom" id="submitBtn">
+                            <i class="fa-solid fa-upload me-2"></i> Upload and Sync Dashboard
+                        </button>
+                        <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-secondary btn-custom text-slate-300">
+                            <i class="fa-solid fa-arrow-left me-2"></i> Back to Analytics Dashboard
+                        </a>
+                    </div>
+                </form>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap 5 JS Bundle -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Interactive UI & Drag-and-Drop Logic -->
+<script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const dropZoneText = document.getElementById('dropZoneText');
+    const fileDetails = document.getElementById('fileDetails');
+    const fileName = document.getElementById('fileName');
+    const removeFileBtn = document.getElementById('removeFileBtn');
+    const uploadForm = document.getElementById('uploadForm');
+    const submitBtn = document.getElementById('submitBtn');
+
+    // Trigger file input click
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // Drag-and-drop highlight handlers
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('dragover');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('dragover');
+        }, false);
+    });
+
+    // Handle File Drop
+    dropZone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt.files;
+        if (files.length) {
+            fileInput.files = files;
+            updateFileDisplay(files[0]);
+        }
+    });
+
+    // Handle File Select via File Picker
+    fileInput.addEventListener('change', (e) => {
+        if (fileInput.files.length) {
+            updateFileDisplay(fileInput.files[0]);
+        }
+    });
+
+    function updateFileDisplay(file) {
+        fileName.textContent = file.name;
+        fileDetails.classList.remove('d-none');
+        dropZone.classList.add('d-none');
+    }
+
+    // Reset Selection
+    removeFileBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fileInput.value = '';
+        fileDetails.classList.add('d-none');
+        dropZone.classList.remove('d-none');
+    });
+
+    // Dynamic Processing Loader State on Submit
+    uploadForm.addEventListener('submit', (e) => {
+        if (!fileInput.files.length) {
+            e.preventDefault();
+            alert('Please select an Excel file before submitting.');
+            return;
+        }
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Parsing Workbook & Syncing Attendance...';
+    });
+</script>
+</body>
+</html>
