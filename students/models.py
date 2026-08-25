@@ -370,3 +370,32 @@ class Achievement(models.Model):
 
     def __str__(self):
         return f"{self.student.name} - {self.title}"
+
+    from django.contrib.auth.models import User
+from django.db import models
+
+# Existing models remain above...
+
+class UserProfile(models.Model):
+    class Role(models.TextChoices):
+        TEACHER = "TEACHER", "Teacher"
+        STUDENT = "STUDENT", "Student"
+
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    role = models.CharField(max_length=10, choices=Role.choices, default=Role.STUDENT)
+    college_email = models.EmailField(unique=True, null=True, blank=True)
+    roll_number = models.CharField(max_length=50, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.user.username} - {self.role}"
+
+# =========================================================
+# 7. AUTHORIZED TEACHERS (WHITELIST FOR TESTING & PRODUCTION)
+# =========================================================
+class AllowedTeacher(models.Model):
+    email = models.EmailField(unique=True, help_text="CS Department teacher email allowed to register")
+    name = models.CharField(max_length=100, blank=True)
+    is_registered = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.email} ({'Registered' if self.is_registered else 'Pending First Login'})"    

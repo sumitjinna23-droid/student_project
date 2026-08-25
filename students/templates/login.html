@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Academic System - Login</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            background: #f4f6f9; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            margin: 0; 
+        }
+        .login-card { 
+            background: white; 
+            padding: 2rem; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); 
+            width: 340px; 
+        }
+        .login-card h2 { 
+            margin-top: 0; 
+            margin-bottom: 0.5rem;
+            color: #333; 
+            text-align: center; 
+        }
+        .info-text {
+            font-size: 0.85rem;
+            color: #666;
+            text-align: center;
+            line-height: 1.4;
+            margin-bottom: 1.5rem;
+            background: #eef4fc;
+            padding: 0.6rem;
+            border-radius: 4px;
+            border-left: 3px solid #007bff;
+        }
+        .form-group { 
+            margin-bottom: 1.2rem; 
+        }
+        .form-group label { 
+            display: block; 
+            margin-bottom: 0.4rem; 
+            color: #555; 
+            font-weight: bold; 
+            font-size: 0.9rem;
+        }
+        .form-group input { 
+            width: 100%; 
+            padding: 0.65rem; 
+            box-sizing: border-box; 
+            border: 1px solid #ccc; 
+            border-radius: 4px; 
+            font-size: 0.95rem; 
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0,123,255,0.15);
+        }
+        .btn { 
+            width: 100%; 
+            padding: 0.75rem; 
+            background: #007bff; 
+            border: none; 
+            color: white; 
+            border-radius: 4px; 
+            font-weight: bold; 
+            cursor: pointer; 
+            font-size: 1rem; 
+            margin-top: 0.5rem;
+        }
+        .btn:hover { 
+            background: #0056b3; 
+        }
+        .messages { 
+            color: #d9534f; 
+            background: #fdf7f7; 
+            padding: 0.6rem; 
+            border: 1px solid #d9534f; 
+            border-radius: 4px; 
+            font-size: 0.9rem; 
+            margin-bottom: 1rem; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="login-card">
+        <h2>Portal Login</h2>
+        
+        <div class="info-text">
+            <strong>First time logging in?</strong> Enter your email or roll number to set up your password.
+        </div>
+
+        {% if messages %}
+            <div class="messages">
+                {% for message in messages %}
+                    <p style="margin: 0;">{{ message }}</p>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <form method="POST">
+            {% csrf_token %}
+            
+            <div class="form-group">
+                <label for="username">Email / Roll Number</label>
+                <input 
+                    type="text" 
+                    id="username"
+                    name="username" 
+                    placeholder="teacher@college.edu or FCS2627001" 
+                    required
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input 
+                    type="password" 
+                    id="password"
+                    name="password" 
+                    placeholder="Leave blank if first-time setup"
+                >
+            </div>
+
+            <button type="submit" class="btn">Log In / Continue</button>
+        </form>
+    </div>
+
+</body>
+</html>

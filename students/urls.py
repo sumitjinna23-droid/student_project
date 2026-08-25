@@ -7,9 +7,13 @@ from . import views
 app_name = 'students'
 
 urlpatterns = [
-    # Dashboard route: handles analytics overview and single-student dossier view
-    path('dashboard/', views.analytics_dashboard, name='analytics_dashboard'),
+    # Auth URLs
+    path('login/', views.custom_login, name='login'),
+    path('logout/', views.custom_logout, name='logout'),
+    path('first-time-setup/', views.first_time_setup, name='first_time_setup'),
     
-    # Route for uploading the 3-sheet Excel workbook
+    # Dashboards & Views
+    path('dashboard/', views.analytics_dashboard, name='analytics_dashboard'),
+    path('student-dashboard/', views.student_dashboard, name='student_dashboard'),
     path('upload-excel/', views.upload_excel_view, name='upload_excel'),
 ]

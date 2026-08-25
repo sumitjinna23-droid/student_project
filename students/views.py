@@ -5,8 +5,12 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib import messages
 from django.db.models import Avg, Q, Sum
 from django.db import transaction
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.models import User  # <--- FIXED: Added User import
 
-from .models import Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES
+# FIXED: Added AllowedTeacher to the imported models list
+from .models import Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher
 from .utils import (
     map_dataframe_columns, 
     parse_year_from_roll, 
@@ -15,8 +19,234 @@ from .utils import (
 )
 
 
+# =========================================================
+# UPDATED AUTHENTICATION & DASHBOARD VIEWS
+# =========================================================
+
+def custom_login(request):
+    """Handles direct login and detects first-time setup for both Students & Teachers."""
+    if request.user.is_authenticated:
+        if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+            return redirect('students:student_dashboard')
+        return redirect('students:analytics_dashboard')
+
+    if request.method == 'POST':
+        identifier = request.POST.get('username', '').strip().lower()
+        password_input = request.POST.get('password', '')
+
+        # -----------------------------------------------------
+        # A. STANDARD LOGIN (If user already created a password)
+        # -----------------------------------------------------
+        user = authenticate(request, username=identifier, password=password_input)
+        
+        # Fallback lookup if student logs in using full email instead of roll number
+        if user is None and '@' in identifier:
+            user_obj = User.objects.filter(email__iexact=identifier).first()
+            if not user_obj:
+                profile_obj = UserProfile.objects.filter(college_email__iexact=identifier).first()
+                if profile_obj:
+                    user_obj = profile_obj.user
+
+            if user_obj:
+                user = authenticate(request, username=user_obj.username, password=password_input)
+
+        if user is not None:
+            # Block registered teachers if they aren't on the CS whitelist
+            if hasattr(user, 'profile') and user.profile.role == UserProfile.Role.TEACHER:
+                if not AllowedTeacher.objects.filter(email__iexact=user.email).exists() and not user.is_superuser:
+                    messages.error(request, "Access Denied: You are not authorized as a CS Department teacher.")
+                    return redirect('students:login')
+
+            login(request, user)
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            if profile.role == UserProfile.Role.STUDENT:
+                return redirect('students:student_dashboard')
+            return redirect('students:analytics_dashboard')
+
+        # -----------------------------------------------------
+        # B. FIRST-TIME SETUP DETECTOR (STUDENTS & TEACHERS)
+        # -----------------------------------------------------
+        
+        # 1. Check if identifier is an ALLOWED CS TEACHER
+        allowed_teacher = AllowedTeacher.objects.filter(email__iexact=identifier).first()
+        if allowed_teacher:
+            teacher_user_exists = User.objects.filter(email__iexact=identifier).exists()
+            if not teacher_user_exists or not allowed_teacher.is_registered:
+                request.session['setup_email'] = identifier
+                request.session['setup_role'] = 'TEACHER'
+                return redirect('students:first_time_setup')
+            else:
+                messages.error(request, "Invalid password. Please try again.")
+                return render(request, 'login.html')
+
+        # 2. Check if identifier belongs to a VALID PRE-ADDED STUDENT (Email or Roll Number)
+        user_identifier = identifier.split('@')[0]
+        student_obj = Student.objects.filter(
+            Q(roll_number__iexact=identifier) | Q(roll_number__iexact=user_identifier)
+        ).first()
+
+        if student_obj:
+            student_user_exists = User.objects.filter(
+                Q(username__iexact=student_obj.roll_number.lower()) | Q(email__iexact=identifier)
+            ).exists()
+            
+            if not student_user_exists:
+                request.session['setup_email'] = identifier if '@' in identifier else f"{student_obj.roll_number.lower()}@college.edu"
+                request.session['setup_roll'] = student_obj.roll_number.lower()
+                request.session['setup_role'] = 'STUDENT'
+                return redirect('students:first_time_setup')
+            else:
+                messages.error(request, "Invalid password. Please try again.")
+                return render(request, 'login.html')
+
+        # 3. REJECT OUTSIDE / UNRECOGNIZED USERS
+        messages.error(request, "Access Denied: Unrecognized email or roll number. Only CS Department students and teachers can log in.")
+
+    return render(request, 'login.html')
+
+
+def first_time_setup(request):
+    """First-time password creation screen for both CS Teachers and Students."""
+    email = request.session.get('setup_email')
+    role = request.session.get('setup_role')
+    roll_number = request.session.get('setup_roll')
+
+    if not email or not role:
+        messages.error(request, "Session expired or invalid setup attempt.")
+        return redirect('students:login')
+
+    if request.method == 'POST':
+        password = request.POST.get('password')
+        confirm_password = request.POST.get('confirm_password')
+
+        if password != confirm_password:
+            messages.error(request, "Passwords do not match.")
+            return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+
+        if len(password) < 6:
+            messages.error(request, "Password must be at least 6 characters long.")
+            return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+
+        if role == 'TEACHER':
+            allowed_teacher = AllowedTeacher.objects.get(email__iexact=email)
+            clean_email = email.lower()
+            
+            user, _ = User.objects.get_or_create(username=clean_email)
+            user.email = clean_email
+            user.set_password(password)
+            user.save()
+
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.role = UserProfile.Role.TEACHER
+            profile.college_email = clean_email
+            profile.save()
+
+            allowed_teacher.is_registered = True
+            allowed_teacher.save()
+
+            messages.success(request, "Teacher account setup complete! Logging you in...")
+
+        elif role == 'STUDENT':
+            student_obj = Student.objects.get(roll_number__iexact=roll_number)
+            
+            # FIXED: Forces roll number to lowercase and explicitly assigns user.email
+            clean_username = student_obj.roll_number.lower()
+            clean_email = email.lower()
+
+            user, _ = User.objects.get_or_create(username=clean_username)
+            user.email = clean_email
+            user.set_password(password)
+            user.save()
+
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.role = UserProfile.Role.STUDENT
+            profile.student = student_obj
+            profile.college_email = clean_email
+            profile.roll_number = student_obj.roll_number.lower()
+            profile.save()
+
+            messages.success(request, "Student account setup complete! Logging you in...")
+
+        request.session.pop('setup_email', None)
+        request.session.pop('setup_role', None)
+        request.session.pop('setup_roll', None)
+
+        login(request, user)
+        if role == 'STUDENT':
+            return redirect('students:student_dashboard')
+        return redirect('students:analytics_dashboard')
+
+    return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+
+
+def custom_logout(request):
+    logout(request)
+    return redirect('students:login')
+
+
+@login_required(login_url='students:login')
+def student_dashboard(request):
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.TEACHER:
+        return redirect('students:analytics_dashboard')
+
+    user_identifier = request.user.username.split('@')[0]
+    student = Student.objects.filter(
+        Q(roll_number__iexact=request.user.username) | 
+        Q(roll_number__iexact=user_identifier)
+    ).first()
+
+    context = {
+        'student': student,
+        'overall_academic_avg': 0.0,
+        'overall_att': 0.0,
+        'total_subjects_evaluated': 0,
+        'subject_performances': [],
+        'subject_attendances': [],
+    }
+
+    if student:
+        student_marks = Marks.objects.filter(student=student).select_related('subject')
+        subject_attendances = SubjectAttendance.objects.filter(student=student).select_related('subject')
+        overall_att = calculate_overall_attendance(student)
+
+        subject_performances = []
+        total_percentage_sum = 0
+
+        for m in student_marks:
+            pct = m.percentage
+            total_percentage_sum += pct
+            ai_analysis = analyze_student_performance(m, overall_att)
+
+            if isinstance(ai_analysis, dict):
+                ai_analysis.setdefault('strongest_unit', m.strongest_unit or 'Unit 1')
+                ai_analysis.setdefault('weakest_unit', m.weakest_unit or 'Unit 3')
+                ai_analysis.setdefault('remedial_plan', 'Assign practice sheets.')
+
+            subject_performances.append({
+                'subject': m.subject.name,
+                'marks': m,
+                'percentage': pct,
+                'status': m.result_status,
+                'ai': ai_analysis
+            })
+
+        subject_count = len(subject_performances)
+        overall_academic_avg = round(total_percentage_sum / subject_count, 1) if subject_count else 0.0
+
+        context.update({
+            'subject_performances': subject_performances,
+            'subject_attendances': subject_attendances,
+            'overall_academic_avg': overall_academic_avg,
+            'overall_att': overall_att,
+            'total_subjects_evaluated': subject_count,
+        })
+
+    return render(request, 'student_dashboard.html', context)
+# =========================================================
+# EXISTING UTILITIES & DASHBOARD LOGIC
+# =========================================================
+
 def clean_val(val):
-    """Utility function to convert cell values to float or None for missing data."""
     if pd.isna(val) or val is None or str(val).strip().lower() in ['', 'nan', 'none', 'null']:
         return None
     try:
@@ -26,7 +256,6 @@ def clean_val(val):
 
 
 def calculate_overall_attendance(student, semester=None):
-    """Calculates total theory + practical attendance percentage across subjects."""
     qs = SubjectAttendance.objects.filter(student=student)
     if semester:
         qs = qs.filter(semester=semester)
@@ -47,7 +276,6 @@ def calculate_overall_attendance(student, semester=None):
 
 
 def compute_smart_action_status(attendance_pct, academic_avg):
-    """Determines Actionable 360° Risk badge classification."""
     att_risk = attendance_pct < 75.0
     acad_risk = academic_avg < 50.0
 
@@ -60,10 +288,12 @@ def compute_smart_action_status(attendance_pct, academic_avg):
     return {"label": "Good", "class": "badge-good"}
 
 
+@login_required
 def analytics_dashboard(request):
-    # =========================================================
-    # 1. BULK UPLOAD HANDLER (SINGLE CSV/EXCEL VIA DASHBOARD)
-    # =========================================================
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+        messages.warning(request, "Access restricted. You have been redirected to your student portal.")
+        return redirect('students:student_dashboard')
+
     if request.method == 'POST' and request.FILES.get('excel_file'):
         uploaded_file = request.FILES['excel_file']
 
@@ -75,7 +305,6 @@ def analytics_dashboard(request):
 
             df.columns = df.columns.str.strip()
             
-            # Check if this is the streamlined Excel Attendance Upload format
             streamlined_cols = {'Roll Number', 'Subject', 'Total Theory', 'Attended Theory', 'Total Practical', 'Attended Practical'}
             if streamlined_cols.issubset(set(df.columns)):
                 records_created = 0
@@ -104,10 +333,9 @@ def analytics_dashboard(request):
                         )
                         records_created += 1
 
-                messages.success(request, f"🎉 Streamlined attendance uploaded for {records_created} records!")
+                messages.success(request, f"Streamlined attendance uploaded for {records_created} records!")
                 return redirect('/dashboard/')
 
-            # Comprehensive multi-column mapping fallback
             df, missing_cols = map_dataframe_columns(df)
             if missing_cols:
                 messages.error(
@@ -215,16 +443,13 @@ def analytics_dashboard(request):
 
                     records_created += 1
 
-            messages.success(request, f"🎉 Success! Imported/Updated {records_created} student records.")
+            messages.success(request, f"Success! Imported/Updated {records_created} student records.")
             return redirect('/dashboard/')
 
         except Exception as e:
             messages.error(request, f"Error processing file: {str(e)}")
             return redirect('/dashboard/')
 
-    # =========================================================
-    # 2. QUERY PARAMETERS & BASE CONTEXT
-    # =========================================================
     selected_student_id = request.GET.get('student_id') or request.GET.get('dossier')
     search_query = request.GET.get('search', '').strip()
     selected_subject_id = request.GET.get('subject')
@@ -241,9 +466,6 @@ def analytics_dashboard(request):
         'is_student_mode': False,
     }
 
-    # =========================================================
-    # 3. MODE 1: SINGLE-STUDENT 360° DOSSIER
-    # =========================================================
     if selected_student_id or search_query:
         student = None
         if selected_student_id:
@@ -271,7 +493,6 @@ def analytics_dashboard(request):
                 if m.result_status == 'PASS':
                     pass_count += 1
 
-                # Filter out units whose max marks are 0 or None
                 unit_scores = {}
                 if getattr(m.subject, 'unit_1_max', getattr(m.subject, 'max_unit_1', 0)) > 0 and m.unit_1_marks is not None:
                     unit_scores['Unit 1'] = m.unit_1_marks
@@ -282,7 +503,6 @@ def analytics_dashboard(request):
                 if getattr(m.subject, 'unit_4_max', getattr(m.subject, 'max_unit_4', 0)) > 0 and m.unit_4_marks is not None:
                     unit_scores['Unit 4'] = m.unit_4_marks
 
-                # Assign strongest & weakest unit based on active units only
                 m.strongest_unit = max(unit_scores, key=unit_scores.get) if unit_scores else "N/A"
                 m.weakest_unit = min(unit_scores, key=unit_scores.get) if unit_scores else "N/A"
 
@@ -340,16 +560,12 @@ def analytics_dashboard(request):
 
             return render(request, 'students/dashboard.html', context)
 
-    # =========================================================
-    # 4. MODE 2: COMPLETE MACRO ROSTER & DEPARTMENT OVERVIEW
-    # =========================================================
     all_marks_qs = Marks.objects.all().select_related('student', 'subject')
     if selected_year:
         all_marks_qs = all_marks_qs.filter(student__year=selected_year)
     if selected_subject_id:
         all_marks_qs = all_marks_qs.filter(subject_id=selected_subject_id)
 
-    # Subject Averages Calculation
     subject_stats = (
         all_marks_qs.values('subject__name')
         .annotate(avg_score=Avg('percentage'))
@@ -358,7 +574,6 @@ def analytics_dashboard(request):
     subject_names = [item['subject__name'] for item in subject_stats]
     subject_averages = [round(item['avg_score'], 1) for item in subject_stats]
 
-    # Unit Mastery Calculation
     unit_mastery = [0, 0, 0, 0]
     if all_marks_qs.exists():
         u1_vals = [m.unit_1_marks for m in all_marks_qs if m.unit_1_marks is not None]
@@ -443,15 +658,14 @@ def analytics_dashboard(request):
 
 
 # =========================================================
-# 5. MULTI-SHEET EXCEL BULK INGESTION VIEW
+# MULTI-SHEET EXCEL BULK INGESTION VIEW
 # =========================================================
+@login_required
 def upload_excel_view(request):
-    """
-    Handles multi-tab Excel ingestion:
-    - Tab 0: Subject Structure
-    - Tab 1: Student Marks
-    - Tab 2: Subject-Wise Attendance Breakdown (Theory & Practical counts)
-    """
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+        messages.error(request, "Access denied. Students cannot upload sheets.")
+        return redirect('student_dashboard')
+
     if request.method == 'POST' and request.FILES.get('excel_file'):
         excel_file = request.FILES['excel_file']
 
@@ -468,7 +682,6 @@ def upload_excel_view(request):
                     val = row.get(col)
                     return float(val) if pd.notna(val) else default
 
-                # 1. PROCESS TAB 1 (Subject Structure)
                 df_subjects = pd.read_excel(xls, sheet_names[0])
                 for _, row in df_subjects.iterrows():
                     subj_name = str(row.get('Subject Name', '')).strip()
@@ -493,7 +706,6 @@ def upload_excel_view(request):
 
                 subject_lookup = {s.name: s for s in Subject.objects.all()}
 
-                # 2. PROCESS TAB 2 (Student Marks)
                 df_marks = pd.read_excel(xls, sheet_names[1])
                 for _, row in df_marks.iterrows():
                     roll = str(row.get('Roll Number', '')).strip()
@@ -539,7 +751,6 @@ def upload_excel_view(request):
 
                 student_lookup = {s.roll_number: s for s in Student.objects.all()}
 
-                # 3. PROCESS TAB 3 (Subject-Wise Attendance Breakdown)
                 df_att = pd.read_excel(xls, sheet_names[2])
 
                 for _, row in df_att.iterrows():
@@ -580,7 +791,7 @@ def upload_excel_view(request):
                         }
                     )
 
-            messages.success(request, "🎉 Success! Multi-sheet academic dataset imported seamlessly.")
+            messages.success(request, "Success! Multi-sheet academic dataset imported seamlessly.")
             return redirect('students:analytics_dashboard')
 
         except Exception as e:

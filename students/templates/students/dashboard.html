@@ -72,7 +72,17 @@
     </style>
 </head>
 <body>
+    <!-- Add the header snippet right here at the top of the body -->
+    <div class="user-profile-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef; margin-bottom: 20px;">
+        <span style="font-weight: 600; font-size: 1.1rem; color: #333;">
+            Welcome, {{ request.user.username }}
+        </span>
+        <a href="{% url 'students:logout' %}" class="btn btn-danger btn-sm" style="padding: 6px 14px; text-decoration: none; border-radius: 4px;">
+            Log Out
+        </a>
+    </div>
 
+    <!-- Rest of your dashboard HTML content continues below... -->
 <div class="container-fluid px-4 py-4" id="dossierContent">
 
     {% if messages %}

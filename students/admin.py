@@ -3,7 +3,7 @@ from django.contrib import admin
 from import_export import resources, fields
 from import_export.widgets import Widget, ForeignKeyWidget
 from import_export.admin import ImportExportModelAdmin
-from .models import Student, Subject, Marks, SubjectAttendance, UserProfile, Achievement
+from .models import Student, Subject, Marks, SubjectAttendance, UserProfile, Achievement, UserProfile
 
 
 # =========================================================
@@ -300,7 +300,10 @@ class AchievementAdmin(ImportExportModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'role', 'student')
+    list_display = ('user', 'role', 'college_email', 'roll_number')
     list_filter = ('role',)
-    search_fields = ('user__username', 'student__name', 'student__roll_number')
-    autocomplete_fields = ['student']
+    search_fields = ('user__username', 'college_email', 'roll_number')
+
+from .models import AllowedTeacher
+
+admin.site.register(AllowedTeacher)
