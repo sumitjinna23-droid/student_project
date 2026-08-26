@@ -62,28 +62,61 @@
         .badge-risk-success { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.4); }
 
         @media print {
-            .no-print { display: none !important; }
-            body { background-color: #ffffff !important; color: #000000 !important; }
-            .card-glass, .ai-terminal { background: #ffffff !important; color: #000000 !important; border: 1px solid #ccc !important; box-shadow: none !important; }
-            .text-white, .text-light { color: #000000 !important; }
+            @page {
+                size: A4 landscape !important;
+                margin: 4mm 6mm !important;
+            }
+            html, body {
+                width: 100% !important;
+                height: 100% !important;
+                background: #ffffff !important;
+                color: #000000 !important;
+                font-size: 7.5pt !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                overflow: hidden !important;
+            }
+            .no-print, .btn, nav, footer, #copyNoticeBtn, ::-webkit-scrollbar {
+                display: none !important;
+            }
+            .card-glass, .ai-terminal { 
+                background: #ffffff !important; 
+                color: #000000 !important; 
+                border: 1px solid #999 !important; 
+                box-shadow: none !important; 
+                padding: 4px 8px !important;
+                margin-bottom: 6px !important;
+            }
+            .text-white, .text-light, .text-muted { color: #000000 !important; }
             .table-dark-custom { --bs-table-color: #000000 !important; }
-            .table-dark-custom td { border-bottom: 1px solid #ddd !important; }
+            .table-dark-custom td, .table-dark-custom th { border: 1px solid #555 !important; padding: 2px 4px !important; font-size: 7.5pt !important; color: #000 !important; }
+            th { background-color: #f0f0f0 !important; }
+            .row { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; }
+            div[class*="col-"] { flex: 1 1 auto !important; max-width: 100% !important; }
         }
     </style>
 </head>
 <body>
-    <!-- Add the header snippet right here at the top of the body -->
-    <div class="user-profile-header" style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: #f8f9fa; border-bottom: 1px solid #e9ecef; margin-bottom: 20px;">
-        <span style="font-weight: 600; font-size: 1.1rem; color: #333;">
-            Welcome, {{ request.user.username }}
-        </span>
-        <a href="{% url 'students:logout' %}" class="btn btn-danger btn-sm" style="padding: 6px 14px; text-decoration: none; border-radius: 4px;">
-            Log Out
+
+    <!-- Unified Command Header (Single Logout Instance) -->
+    <div class="user-profile-header d-flex justify-content-between align-items-center px-4 py-3 bg-dark border-bottom border-secondary mb-4">
+        <div class="d-flex align-items-center gap-2">
+            <i class="fa-solid fa-user-shield text-primary fs-5"></i>
+           <span class="fw-bold text-white fs-6">
+    Active Session: 
+    {% if request.user.is_authenticated %}
+        {{ user_display_name|default:request.user.username }}
+    {% else %}
+        Guest User
+    {% endif %}
+</span>
+        </div>
+        <a href="{% url 'students:logout' %}" class="btn btn-outline-danger btn-sm fw-bold px-3">
+            <i class="fa-solid fa-right-from-bracket me-1"></i> Log Out
         </a>
     </div>
 
-    <!-- Rest of your dashboard HTML content continues below... -->
-<div class="container-fluid px-4 py-4" id="dossierContent">
+<div class="container-fluid px-4 py-2" id="dossierContent">
 
     {% if messages %}
         {% for message in messages %}
@@ -113,14 +146,13 @@
                 <i class="fa-solid fa-gear"></i> Admin Panel
             </a>
 
-            <!-- Opens modal for 3-sheet Excel processing directly on dashboard -->
             <button class="btn btn-success fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
                 <i class="fa-solid fa-file-excel"></i> Upload Excel / CSV
             </button>
         </div>
     </div>
 
-    <!-- SCOPE FILTER BAR: CLASS & SUBJECT SELECTOR -->
+    <!-- SCOPE FILTER BAR -->
     <div class="card-glass p-3 mb-4 no-print">
         <form method="GET" class="row g-3 align-items-center">
             <div class="col-md-5">
@@ -169,13 +201,22 @@
     <!-- MODE 1: SINGLE-STUDENT 360° DOSSIER -->
     <div class="alert alert-info border-0 bg-primary text-white p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
         <div>
-            <h4 class="fw-bold mb-0"><i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier: {{ student.name }}</h4>
+            <h4 class="fw-bold mb-0">
+                <i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier: 
+                {% if student.name %}
+                    {{ student.name }}
+                {% elif student.user %}
+                    {{ student.user.get_full_name|default:student.user.username }}
+                {% else %}
+                    Student #{{ student.id }}
+                {% endif %}
+            </h4>
             <span>Roll Number: <strong>{{ student.roll_number }}</strong> | Class: <strong>{{ student.get_year_display }}</strong></span>
         </div>
         <div class="d-flex gap-2 no-print">
-            <button id="exportPdfBtn" onclick="window.print()" class="btn btn-light btn-sm fw-bold shadow-sm">
-    <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export Report PDF
-</button>
+            <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold shadow-sm">
+                <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export Report PDF
+            </button>
             <a href="/dashboard/" class="btn btn-outline-light btn-sm fw-bold">← Back to Overview</a>
         </div>
     </div>
@@ -215,17 +256,35 @@
         </div>
     </div>
 
+    <!-- SMART ACHIEVEMENTS SECTION IN DOSSIER -->
+    {% if achievements or student.achievements.all %}
+    <div class="card-glass p-4 mb-4 border-warning">
+        <h5 class="fw-bold text-warning mb-2"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
+        <div class="d-flex flex-wrap gap-2 mt-2">
+            {% if achievements %}
+                {% for badge in achievements %}
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fa-solid fa-star me-1"></i>{{ badge }}</span>
+                {% endfor %}
+            {% else %}
+                {% for badge in student.achievements.all %}
+                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fa-solid fa-star me-1"></i>{{ badge.title }}</span>
+                {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     <div class="card-glass p-4 mb-4 border-warning">
         <div class="d-flex justify-content-between align-items-center mb-2">
             <h5 class="fw-bold text-warning mb-0"><i class="fa-solid fa-comment-sms me-2"></i>Auto-Generated Parent Notice Synthesizer</h5>
-            <button class="btn btn-sm btn-outline-warning no-print" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
+            <button id="copyNoticeBtn" class="btn btn-sm btn-outline-warning no-print" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
                 <i class="fa-solid fa-copy me-1"></i> Copy Notice Text
             </button>
         </div>
         <pre id="noticeText" class="p-3 bg-dark text-white rounded border border-secondary mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ parent_notice_draft }}</pre>
     </div>
 
-    <!-- PART 1: HIGH-LEVEL ACADEMIC SUMMARY TABLE -->
+    <!-- PART 1: ACADEMIC SUMMARY TABLE -->
     <div class="card-glass p-4 mb-4">
         <h5 class="fw-bold text-white mb-3">
             <i class="fa-solid fa-book-open me-2 text-primary"></i>Subject Performance & AI Recommendations
@@ -256,7 +315,7 @@
                             <span class="badge bg-primary px-2 py-1 fs-6">{{ item.marks.grade|default:"N/A" }}</span>
                         </td>
                         <td>
-                            {% if item.marks.result_status == 'PASS' or item.marks.result_status == 'Pass' %}
+                            {% if item.marks.result_status == 'PASS' or item.status == 'PASS' %}
                                 <span class="badge bg-success px-2 py-1 fs-6">PASS</span>
                             {% else %}
                                 <span class="badge bg-danger px-2 py-1 fs-6">FAIL</span>
@@ -288,127 +347,119 @@
     </div>
 
    <!-- PART 2: DETAILED COMPONENT BREAKDOWN -->
-<div class="card-glass p-4 mb-4">
-    <h5 class="fw-bold text-white mb-3">
-        <i class="fa-solid fa-list-check me-2 text-info"></i>Detailed Assessment Component Breakdown
-    </h5>
-    <div class="table-responsive">
-        <table class="table table-dark-custom align-middle text-center">
-            <thead>
-                <tr class="text-white small">
-                    <th class="text-start">Subject</th>
-                    <th>Unit 1</th>
-                    <th>Unit 2</th>
-                    <th>Unit 3</th>
-                    <th>Unit 4</th>
-                    <th>Internal</th>
-                    <th>Assignment</th>
-                    <th>Presentation</th>
-                    <th>Practical</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in subject_performances %}
-                <tr>
-                    <td class="fw-bold text-white text-start fs-6">{{ item.subject }}</td>
+    <div class="card-glass p-4 mb-4">
+        <h5 class="fw-bold text-white mb-3">
+            <i class="fa-solid fa-list-check me-2 text-info"></i>Detailed Assessment Component Breakdown
+        </h5>
+        <div class="table-responsive">
+            <table class="table table-dark-custom align-middle text-center">
+                <thead>
+                    <tr class="text-white small">
+                        <th class="text-start">Subject</th>
+                        <th>Unit 1</th>
+                        <th>Unit 2</th>
+                        <th>Unit 3</th>
+                        <th>Unit 4</th>
+                        <th>Internal</th>
+                        <th>Assignment</th>
+                        <th>Presentation</th>
+                        <th>Practical</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in subject_performances %}
+                    <tr>
+                        <td class="fw-bold text-white text-start fs-6">{{ item.subject }}</td>
 
-                    <!-- Unit 1 -->
-                    <td>
-                        {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_1_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.unit_1_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-light fw-bold">{{ item.marks.unit_1_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_1_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.unit_1_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-light fw-bold">{{ item.marks.unit_1_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Unit 2 -->
-                    <td>
-                        {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_2_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.unit_2_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-light fw-bold">{{ item.marks.unit_2_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_2_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.unit_2_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-light fw-bold">{{ item.marks.unit_2_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Unit 3 -->
-                    <td>
-                        {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_3_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.unit_3_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-light fw-bold">{{ item.marks.unit_3_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_3_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.unit_3_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-light fw-bold">{{ item.marks.unit_3_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Unit 4 -->
-                    <td>
-                        {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_4_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.unit_4_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-light fw-bold">{{ item.marks.unit_4_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_4_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.unit_4_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-light fw-bold">{{ item.marks.unit_4_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Internal -->
-                    <td>
-                        {% if item.marks.subject.max_internal_marks|default:0 == 0 or item.marks.internal_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.internal_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-info fw-bold">{{ item.marks.internal_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_internal_marks|default:0 == 0 or item.marks.internal_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.internal_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-info fw-bold">{{ item.marks.internal_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Assignment -->
-                    <td>
-                        {% if item.marks.subject.max_assignment_marks|default:0 == 0 or item.marks.assignment_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.assignment_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-info fw-bold">{{ item.marks.assignment_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_assignment_marks|default:0 == 0 or item.marks.assignment_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.assignment_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-info fw-bold">{{ item.marks.assignment_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Presentation -->
-                    <td>
-                        {% if item.marks.subject.max_presentation_marks|default:0 == 0 or item.marks.presentation_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.presentation_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-info fw-bold">{{ item.marks.presentation_marks }}</span>
-                        {% endif %}
-                    </td>
+                        <td>
+                            {% if item.marks.subject.max_presentation_marks|default:0 == 0 or item.marks.presentation_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.presentation_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-info fw-bold">{{ item.marks.presentation_marks }}</span>
+                            {% endif %}
+                        </td>
 
-                    <!-- Practical -->
-                    <td>
-                        {% if item.marks.subject.max_practical_marks|default:0 == 0 or item.marks.practical_marks is None %}
-                            <span class="text-secondary small">N/A</span>
-                        {% elif item.marks.practical_marks == 0 %}
-                            <span class="text-danger fw-bold">0</span>
-                        {% else %}
-                            <span class="text-success fw-bold">{{ item.marks.practical_marks }}</span>
-                        {% endif %}
-                    </td>
-                </tr>
-                {% empty %}
-                <tr>
-                    <td colspan="9" class="text-center text-muted py-3">No evaluation data available.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                        <td>
+                            {% if item.marks.subject.max_practical_marks|default:0 == 0 or item.marks.practical_marks is None %}
+                                <span class="text-secondary small">N/A</span>
+                            {% elif item.marks.practical_marks == 0 %}
+                                <span class="text-danger fw-bold">0</span>
+                            {% else %}
+                                <span class="text-success fw-bold">{{ item.marks.practical_marks }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="9" class="text-center text-muted py-3">No evaluation data available.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
-</div>
 
     <!-- PART 3: SUBJECT-WISE ATTENDANCE BREAKDOWN -->
     <div class="card-glass p-4 mb-4">
@@ -443,10 +494,8 @@
                 <tbody>
                     {% for att in subject_attendances %}
                     <tr>
-                        <!-- Subject Name -->
                         <td class="text-start fw-bold text-white">{{ att.subject.name }}</td>
 
-                        <!-- Theory Stats -->
                         {% if att.theory_total > 0 %}
                             <td class="text-light">{{ att.theory_attended }}</td>
                             <td class="text-light">{{ att.theory_total }}</td>
@@ -455,7 +504,6 @@
                             <td colspan="3" class="text-muted small">N/A (No Theory)</td>
                         {% endif %}
 
-                        <!-- Practical Stats -->
                         {% if att.practical_total > 0 %}
                             <td class="text-light">{{ att.practical_attended }}</td>
                             <td class="text-light">{{ att.practical_total }}</td>
@@ -464,7 +512,6 @@
                             <td colspan="3" class="text-muted small">N/A (No Lab)</td>
                         {% endif %}
 
-                        <!-- Combined Subject Stats -->
                         <td class="fw-semibold text-white">{{ att.total_attended }} / {{ att.total_classes_conducted }}</td>
                         <td>
                             <span class="badge {% if att.overall_subject_percentage < 75 %}badge-risk-danger{% else %}badge-risk-success{% endif %} fs-6">
@@ -472,7 +519,6 @@
                             </span>
                         </td>
 
-                        <!-- AI / Threshold Status -->
                         <td>
                             <span class="badge bg-{{ att.attendance_status.color|default:'primary' }} px-2 py-1">
                                 {% if att.attendance_status.icon %}
@@ -541,11 +587,22 @@
         </div>
     </div>
 
+    <!-- 4-QUADRANT SCATTER ANALYTICS CHART -->
     <div class="row g-4 mb-4">
         <div class="col-12">
             <div class="card-glass p-4">
-                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-chart-line me-2 text-warning"></i>Attendance vs Performance Correlation Scatter Plot</h5>
-                <canvas id="scatterChart" style="max-height: 260px;"></canvas>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="fw-bold text-white mb-0">
+                        <i class="fa-solid fa-chart-line me-2 text-warning"></i>4-Quadrant Attendance vs Performance Analytics
+                    </h5>
+                    <div class="d-flex gap-2">
+                        <span class="badge bg-success opacity-75">High Att / High Marks</span>
+                        <span class="badge bg-primary opacity-75">Low Att / High Marks</span>
+                        <span class="badge bg-warning text-dark opacity-75">High Att / Low Marks</span>
+                        <span class="badge bg-danger opacity-75">Low Att / Low Marks</span>
+                    </div>
+                </div>
+                <canvas id="scatterChart" style="max-height: 280px;"></canvas>
             </div>
         </div>
     </div>
@@ -564,7 +621,15 @@
                             <tr class="clickable-row" onclick="window.location='?student_id={{ top.student.id }}'">
                                 <td><span class="badge bg-warning text-dark fw-bold">#{{ forloop.counter }}</span></td>
                                 <td><strong>{{ top.student.roll_number }}</strong></td>
-                                <td>{{ top.student.name }}</td>
+                                <td>
+                                    {% if top.student.name %}
+                                        {{ top.student.name }}
+                                    {% elif top.student.user %}
+                                        {{ top.student.user.get_full_name|default:top.student.user.username }}
+                                    {% else %}
+                                        Student #{{ top.student.id }}
+                                    {% endif %}
+                                </td>
                                 <td><span class="badge bg-secondary">{{ top.student.get_year_display }}</span></td>
                                 <td><span class="badge bg-success fs-6">{{ top.avg_marks|default:0 }}%</span></td>
                             </tr>
@@ -589,7 +654,15 @@
                             {% for bot in bottom_remedial_roster %}
                             <tr class="clickable-row" onclick="window.location='?student_id={{ bot.student.id }}'">
                                 <td><strong>{{ bot.student.roll_number }}</strong></td>
-                                <td>{{ bot.student.name }}</td>
+                                <td>
+                                    {% if bot.student.name %}
+                                        {{ bot.student.name }}
+                                    {% elif bot.student.user %}
+                                        {{ bot.student.user.get_full_name|default:bot.student.user.username }}
+                                    {% else %}
+                                        Student #{{ bot.student.id }}
+                                    {% endif %}
+                                </td>
                                 <td>{{ bot.attendance|default:0 }}%</td>
                                 <td><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
                                 <td><small class="text-warning">{{ bot.remedial }}</small></td>
@@ -618,7 +691,15 @@
                     {% for item in master_student_roster %}
                     <tr class="clickable-row" onclick="window.location='?student_id={{ item.student.id }}'">
                         <td><strong>{{ item.student.roll_number }}</strong></td>
-                        <td>{{ item.student.name }}</td>
+                        <td>
+                            {% if item.student.name %}
+                                {{ item.student.name }}
+                            {% elif item.student.user %}
+                                {{ item.student.user.get_full_name|default:item.student.user.username }}
+                            {% else %}
+                                Student #{{ item.student.id }}
+                            {% endif %}
+                        </td>
                         <td><span class="badge bg-secondary">{{ item.student.get_year_display }}</span></td>
                         <td><strong>{{ item.avg_marks|default:0 }}%</strong></td>
                         <td>{{ item.attendance|default:0 }}%</td>
@@ -635,6 +716,7 @@
 
     <script>
         document.addEventListener("DOMContentLoaded", function() {
+            // 1. Subject Performance Chart
             const subElem = document.getElementById('subjectChart');
             if (subElem) {
                 new Chart(subElem.getContext('2d'), {
@@ -659,6 +741,7 @@
                 });
             }
 
+            // 2. Unit Mastery Chart
             const unitElem = document.getElementById('unitChart');
             if (unitElem) {
                 new Chart(unitElem.getContext('2d'), {
@@ -683,36 +766,68 @@
                 });
             }
 
-            const scatterElem = document.getElementById('scatterChart');
-            if (scatterElem) {
-                new Chart(scatterElem.getContext('2d'), {
-                    type: 'scatter',
-                    data: {
-                        datasets: [{
-                            label: 'Students',
-                            data: {{ scatter_data|default:"[]"|safe }},
-                            backgroundColor: '#3B82F6',
-                            pointRadius: 6
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        plugins: {
-                            tooltip: {
-                                callbacks: {
-                                    label: function(ctx) {
-                                        return (ctx.raw.name || 'Student') + ': Att ' + ctx.raw.x + '%, Marks ' + ctx.raw.y + '%';
-                                    }
-                                }
-                            }
-                        },
-                        scales: {
-                            x: { title: { display: true, text: 'Attendance %', color: '#9CA3AF' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9CA3AF' } },
-                            y: { title: { display: true, text: 'Marks %', color: '#9CA3AF' }, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9CA3AF' } }
+            // 3. 4-Quadrant Scatter Analytics Chart
+const scatterElem = document.getElementById('scatterChart');
+if (scatterElem) {
+    // Safely pull quadrant data from context
+    const scatterQuads = {{ scatter_quadrants|default:"{}"|safe }};
+    const qTopRight = scatterQuads.top_right || {{ quadrant_top_right|default:"[]"|safe }};
+    const qTopLeft = scatterQuads.top_left || {{ quadrant_top_left|default:"[]"|safe }};
+    const qBottomRight = scatterQuads.bottom_right || {{ quadrant_bottom_right|default:"[]"|safe }};
+    const qBottomLeft = scatterQuads.bottom_left || {{ quadrant_bottom_left|default:"[]"|safe }};
+    const rawScatter = {{ scatter_data|default:"[]"|safe }};
+
+    let datasets = [];
+
+    if (qTopRight.length || qTopLeft.length || qBottomRight.length || qBottomLeft.length) {
+        datasets = [
+            { label: 'High Att / High Marks', data: qTopRight, backgroundColor: '#10B981', pointRadius: 6 },
+            { label: 'Low Att / High Marks', data: qTopLeft, backgroundColor: '#3B82F6', pointRadius: 6 },
+            { label: 'High Att / Low Marks', data: qBottomRight, backgroundColor: '#F59E0B', pointRadius: 6 },
+            { label: 'Low Att / Low Marks', data: qBottomLeft, backgroundColor: '#EF4444', pointRadius: 6 }
+        ];
+    } else {
+        datasets = [{
+            label: 'Students',
+            data: rawScatter,
+            backgroundColor: '#3B82F6',
+            pointRadius: 6
+        }];
+    }
+
+    new Chart(scatterElem.getContext('2d'), {
+        type: 'scatter',
+        data: { datasets: datasets },
+        options: {
+            responsive: true,
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) {
+                            return (ctx.raw.name || 'Student') + ': Att ' + ctx.raw.x + '%, Marks ' + ctx.raw.y + '%';
                         }
                     }
-                });
+                }
+            },
+            scales: {
+                x: { 
+                    title: { display: true, text: 'Attendance %', color: '#9CA3AF' }, 
+                    min: 0, 
+                    max: 100, 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { color: '#9CA3AF' } 
+                },
+                y: { 
+                    title: { display: true, text: 'Marks %', color: '#9CA3AF' }, 
+                    min: 0, 
+                    max: 100, 
+                    grid: { color: 'rgba(255,255,255,0.05)' }, 
+                    ticks: { color: '#9CA3AF' } 
+                }
             }
+        }
+    });
+}
         });
     </script>
     {% endif %}
@@ -727,7 +842,6 @@
                 <h5 class="modal-title fw-bold"><i class="fa-solid fa-file-excel text-success me-2"></i>Upload Academic Data Workbook (.xlsx)</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <!-- ACTION SUBMITS DIRECTLY TO upload_excel VIEW -->
             <form method="POST" action="{% url 'students:upload_excel' %}" enctype="multipart/form-data">
                 {% csrf_token %}
                 <div class="modal-body">
@@ -786,108 +900,3 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
-
-<style>
-/* Print Stylesheet Overrides */
-@media print {
-    /* 1. Page Constraints: Tight margins for 1-Page A4 Landscape */
-    @page {
-        size: A4 landscape !important;
-        margin: 4mm 6mm !important; /* Micro margins maximize vertical print space */
-    }
-
-    html, body {
-        width: 100% !important;
-        height: 100% !important;
-        background: #ffffff !important;
-        color: #000000 !important;
-        font-size: 7.5pt !important; /* Compact base font */
-        margin: 0 !important;
-        padding: 0 !important;
-        overflow: hidden !important;
-    }
-
-    /* 2. Hide On-Screen Buttons & Controls */
-    .btn, nav, footer, #copyNoticeBtn, .no-print, ::-webkit-scrollbar {
-        display: none !important;
-    }
-
-    /* 3. Force Top Stat Cards into 1 Horizontal Row */
-    .row {
-        display: flex !important;
-        flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        margin-left: -2px !important;
-        margin-right: -2px !important;
-    }
-
-    div[class*="col-"] {
-        flex: 1 1 auto !important;
-        padding: 0 3px !important;
-        max-width: 100% !important;
-    }
-
-    /* 4. Compact Card Boxes */
-    .card-glass, .notice-card-container, div[class*="card"] {
-        background: #ffffff !important;
-        color: #000000 !important;
-        border: 1px solid #999999 !important;
-        border-radius: 4px !important;
-        padding: 4px 8px !important;
-        margin-bottom: 6px !important;
-        box-shadow: none !important;
-        page-break-inside: avoid !important;
-    }
-
-    /* Reduce Header & Metric Font Sizes */
-    h1, h2, h3, h4, h5, h6 {
-        color: #000000 !important;
-        font-weight: bold !important;
-        margin-top: 0 !important;
-        margin-bottom: 2px !important;
-    }
-
-    h5 { font-size: 9pt !important; }
-    .fs-1, .fs-2, .display-4, .h1 { font-size: 14pt !important; font-weight: bold !important; }
-
-    /* 5. Auto-Generated Notice Box Shrink */
-    .notice-body-box, #noticeText, pre {
-        background: #ffffff !important;
-        color: #000000 !important;
-        -webkit-text-fill-color: #000000 !important;
-        font-size: 7.5pt !important;
-        line-height: 1.15 !important;
-        padding: 4px 6px !important;
-        margin: 0 !important;
-        white-space: pre-wrap !important;
-    }
-
-    /* 6. High-Density Tables */
-    .table-responsive, div {
-        overflow: visible !important;
-        display: block !important;
-        width: 100% !important;
-    }
-
-    table {
-        width: 100% !important;
-        table-layout: fixed !important;
-        border-collapse: collapse !important;
-        margin-bottom: 0 !important;
-    }
-
-    th, td {
-        border: 1px solid #555555 !important;
-        padding: 2px 4px !important;
-        font-size: 7.5pt !important;
-        color: #000000 !important;
-        word-wrap: break-word !important;
-        white-space: normal !important;
-    }
-
-    th {
-        background-color: #f0f0f0 !important;
-        font-weight: bold !important;
-    }
-}
-</style>

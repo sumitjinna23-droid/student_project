@@ -350,52 +350,48 @@ class SubjectAttendance(models.Model):
 # 5. USER PROFILE MODEL
 # =========================================================
 class UserProfile(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    role = models.CharField(max_length=10, choices=ROLE_CHOICES, default='STUDENT')
-    student = models.OneToOneField(Student, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_account')
-
-    def __str__(self):
-        return f"{self.user.username} ({self.role})"
-
-
-# =========================================================
-# 6. ACHIEVEMENT MODEL
-# =========================================================
-class Achievement(models.Model):
-    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='achievements')
-    title = models.CharField(max_length=200)
-    category = models.CharField(max_length=100, default='Academic')
-    date_achieved = models.DateField(null=True, blank=True)
-    description = models.TextField(blank=True)
-
-    def __str__(self):
-        return f"{self.student.name} - {self.title}"
-
-    from django.contrib.auth.models import User
-from django.db import models
-
-# Existing models remain above...
-
-class UserProfile(models.Model):
     class Role(models.TextChoices):
         TEACHER = "TEACHER", "Teacher"
         STUDENT = "STUDENT", "Student"
 
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.STUDENT)
+    student = models.OneToOneField(Student, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_account')
     college_email = models.EmailField(unique=True, null=True, blank=True)
     roll_number = models.CharField(max_length=50, null=True, blank=True)
 
     def __str__(self):
         return f"{self.user.username} - {self.role}"
 
+
+# =========================================================
+# 6. ACHIEVEMENT MODEL
+# =========================================================
+class Achievement(models.Model):
+    CATEGORY_CHOICES = [
+        ('SPORTS', 'Sports'),
+        ('ACADEMIC', 'Academic'),
+        ('CULTURAL', 'Cultural'),
+        ('OTHER', 'Other'),
+    ]
+
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='achievements')
+    title = models.CharField(max_length=200)
+    category = models.CharField(max_length=100, choices=CATEGORY_CHOICES, default='ACADEMIC')
+    description = models.TextField(blank=True)
+    date_achieved = models.DateField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.student.name} - {self.title}"
+
+
 # =========================================================
 # 7. AUTHORIZED TEACHERS (WHITELIST FOR TESTING & PRODUCTION)
 # =========================================================
 class AllowedTeacher(models.Model):
-    email = models.EmailField(unique=True, help_text="CS Department teacher email allowed to register")
-    name = models.CharField(max_length=100, blank=True)
+    email = models.EmailField(unique=True)
+    name = models.CharField(max_length=100, blank=True, help_text="e.g. Prof. Alan Turing")
     is_registered = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.email} ({'Registered' if self.is_registered else 'Pending First Login'})"    
+        return f"{self.name} ({self.email})" if self.name else self.email

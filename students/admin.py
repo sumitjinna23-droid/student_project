@@ -3,7 +3,7 @@ from django.contrib import admin
 from import_export import resources, fields
 from import_export.widgets import Widget, ForeignKeyWidget
 from import_export.admin import ImportExportModelAdmin
-from .models import Student, Subject, Marks, SubjectAttendance, UserProfile, Achievement, UserProfile
+from .models import Student, Subject, Marks, SubjectAttendance, UserProfile, Achievement, AllowedTeacher
 
 
 # =========================================================
@@ -304,6 +304,26 @@ class UserProfileAdmin(admin.ModelAdmin):
     list_filter = ('role',)
     search_fields = ('user__username', 'college_email', 'roll_number')
 
-from .models import AllowedTeacher
+@admin.register(AllowedTeacher)
+class AllowedTeacherAdmin(admin.ModelAdmin):
+    list_display = ('name', 'email', 'is_registered')
+    search_fields = ('name', 'email')
 
-admin.site.register(AllowedTeacher)
+    def is_primary_admin(self, request):
+        """Returns True ONLY if the logged-in user is NOT a regular teacher."""
+        if hasattr(request.user, 'profile'):
+            return request.user.profile.role != UserProfile.Role.TEACHER
+        # Fallback: if no profile exists, check if account is not a teacher email
+        return not request.user.email.endswith('@college.edu')
+
+    def has_module_permission(self, request):
+        return self.is_primary_admin(request)
+
+    def has_add_permission(self, request):
+        return self.is_primary_admin(request)
+
+    def has_change_permission(self, request, obj=None):
+        return self.is_primary_admin(request)
+
+    def has_delete_permission(self, request, obj=None):
+        return self.is_primary_admin(request)
