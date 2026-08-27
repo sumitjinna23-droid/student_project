@@ -85,6 +85,22 @@
             font-size: 0.9rem; 
             margin-bottom: 1rem; 
         }
+        .auth-footer {
+            margin-top: 1.25rem;
+            text-align: center;
+            font-size: 0.85rem;
+            border-top: 1px solid #eee;
+            padding-top: 1rem;
+        }
+        .forgot-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .forgot-link:hover {
+            text-decoration: underline;
+            color: #0056b3;
+        }
     </style>
 </head>
 <body>
@@ -130,6 +146,11 @@
 
             <button type="submit" class="btn">Log In / Continue</button>
         </form>
+
+        <!-- Integrated Django Password Reset Link (Requirement 1) -->
+        <div class="auth-footer">
+            <a href="{% url 'students:password_reset_request' %}" class="forgot-link">Forgot Password?</a>
+        </div>
     </div>
 
 </body>

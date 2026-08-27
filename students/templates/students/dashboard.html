@@ -98,22 +98,25 @@
 </head>
 <body>
 
-    <!-- Unified Command Header (Single Logout Instance) -->
+    <!-- Unified Command Header (With Password Reset Link) -->
     <div class="user-profile-header d-flex justify-content-between align-items-center px-4 py-3 bg-dark border-bottom border-secondary mb-4">
         <div class="d-flex align-items-center gap-2">
             <i class="fa-solid fa-user-shield text-primary fs-5"></i>
-           <span class="fw-bold text-white fs-6">
-    Active Session: 
-    {% if request.user.is_authenticated %}
-        {{ user_display_name|default:request.user.username }}
-    {% else %}
-        Guest User
-    {% endif %}
-</span>
+            <span class="fw-bold text-white fs-6">
+                Active Session: 
+                {% if request.user.is_authenticated %}
+                    {{ user_display_name|default:request.user.username }}
+                {% else %}
+                    Guest User
+                {% endif %}
+            </span>
         </div>
-        <a href="{% url 'students:logout' %}" class="btn btn-outline-danger btn-sm fw-bold px-3">
-            <i class="fa-solid fa-right-from-bracket me-1"></i> Log Out
-        </a>
+        <div class="d-flex gap-2 align-items-center">
+            <!-- REQUIREMENT 1: Password Reset Integration -->
+            <a href="{% url 'students:logout' %}" class="btn btn-outline-danger btn-sm fw-bold px-3">
+                <i class="fa-solid fa-right-from-bracket me-1"></i> Log Out
+            </a>
+        </div>
     </div>
 
 <div class="container-fluid px-4 py-2" id="dossierContent">
@@ -129,28 +132,45 @@
     {% endif %}
 
     <!-- HEADER & SEARCH BAR -->
-    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3 mb-4 no-print">
-        <div>
-            <h2 class="fw-extrabold mb-0"><i class="fa-solid fa-graduation-cap text-primary me-2"></i>Department Executive Command Hub</h2>
-            <small class="text-muted">Centralized Academic Operating System for Faculty</small>
-        </div>
-
-        <div class="d-flex gap-2 align-items-center flex-wrap">
-            <form method="GET" class="d-flex gap-2">
-                <input type="text" name="search" class="form-control bg-dark text-white border-secondary rounded-3" 
-                       placeholder="🔍 Search Roll No or Name..." value="{{ search_query|default:'' }}">
-                <button type="submit" class="btn btn-primary fw-bold px-3">Inspect</button>
-            </form>
-
-            <a href="/admin/" target="_blank" class="btn btn-outline-warning fw-bold px-3 d-flex align-items-center gap-2">
-                <i class="fa-solid fa-gear"></i> Admin Panel
-            </a>
-
-            <button class="btn btn-success fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
-                <i class="fa-solid fa-file-excel"></i> Upload Excel / CSV
-            </button>
-        </div>
+<div class="card bg-dark text-white border-secondary p-4 mb-4 no-print shadow-sm rounded-4">
+    <!-- Row 1: Top Command Hub Title Block -->
+    <div class="mb-3">
+        <h2 class="fw-extrabold mb-1 d-flex align-items-center gap-2 text-white">
+            <i class="fa-solid fa-graduation-cap text-primary fs-2"></i> Department Executive Command Hub
+        </h2>
+        <div class="text-secondary small fw-medium">Centralized Academic Operating System for Faculty</div>
     </div>
+
+    <hr class="border-secondary opacity-25 my-3">
+
+    <!-- Row 2: Right-Aligned Action Controls -->
+    <div class="d-flex justify-content-end align-items-center gap-2 flex-wrap">
+        <form method="GET" class="d-flex gap-2">
+            <div class="input-group">
+                <span class="input-group-text bg-dark text-secondary border-secondary">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                </span>
+                <input type="text" name="search" class="form-control bg-dark text-white border-secondary" 
+                       placeholder="Search Roll No or Name..." value="{{ search_query|default:'' }}">
+            </div>
+            <button type="submit" class="btn btn-primary fw-bold px-3">Inspect</button>
+        </form>
+
+        <a href="/admin/" target="_blank" class="btn btn-outline-warning fw-bold px-3 d-flex align-items-center gap-2">
+            <i class="fa-solid fa-gear"></i> Admin Panel
+        </a>
+
+        <!-- Excel History & Deletion Trigger -->
+        <button class="btn btn-outline-info fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#batchHistoryModal">
+            <i class="fa-solid fa-clock-rotate-left"></i> Batch History
+        </button>
+
+        <!-- Upload Button -->
+        <button class="btn btn-success fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
+            <i class="fa-solid fa-file-excel"></i> Upload Excel / CSV
+        </button>
+    </div>
+</div>
 
     <!-- SCOPE FILTER BAR -->
     <div class="card-glass p-3 mb-4 no-print">
@@ -255,24 +275,40 @@
             </div>
         </div>
     </div>
-
-    <!-- SMART ACHIEVEMENTS SECTION IN DOSSIER -->
-    {% if achievements or student.achievements.all %}
-    <div class="card-glass p-4 mb-4 border-warning">
-        <h5 class="fw-bold text-warning mb-2"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
-        <div class="d-flex flex-wrap gap-2 mt-2">
-            {% if achievements %}
-                {% for badge in achievements %}
-                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fa-solid fa-star me-1"></i>{{ badge }}</span>
-                {% endfor %}
-            {% else %}
-                {% for badge in student.achievements.all %}
-                    <span class="badge bg-warning text-dark px-3 py-2 fs-6"><i class="fa-solid fa-star me-1"></i>{{ badge.title }}</span>
-                {% endfor %}
-            {% endif %}
-        </div>
+<!-- REQUIREMENT 2: Full Achievement Depth Rendering -->
+<div class="card-glass p-4 mb-4 border-warning">
+    <h5 class="fw-bold text-warning mb-3"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
+    <div class="row g-3">
+        {% if achievements or student.achievements.all %}
+            {% for item in achievements|default:student.achievements.all %}
+                <div class="col-md-6 col-lg-4">
+                    <div class="p-3 bg-dark rounded border border-warning h-100 d-flex flex-column justify-content-between">
+                        <div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="badge bg-warning text-dark fw-bold">
+                                    <i class="fa-solid fa-star me-1"></i>{{ item.category|default:"Honor / Award" }}
+                                </span>
+                                {% if item.date_achieved %}
+                                    <small class="text-warning opacity-75 fw-semibold">
+                                        <i class="fa-solid fa-calendar-alt me-1"></i>{{ item.date_achieved|date:"M d, Y" }}
+                                    </small>
+                                {% endif %}
+                            </div>
+                            <h6 class="fw-bold text-white mb-2">{{ item.title|default:item }}</h6>
+                            {% if item.description %}
+                                <p class="text-light opacity-75 small mb-0">{{ item.description }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="col-12">
+                <span class="text-muted small">No achievements, extra-curricular honors, or awards currently recorded for this student.</span>
+            </div>
+        {% endif %}
     </div>
-    {% endif %}
+</div>
 
     <div class="card-glass p-4 mb-4 border-warning">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -766,72 +802,122 @@
                 });
             }
 
-            // 3. 4-Quadrant Scatter Analytics Chart
-const scatterElem = document.getElementById('scatterChart');
-if (scatterElem) {
-    // Safely pull quadrant data from context
-    const scatterQuads = {{ scatter_quadrants|default:"{}"|safe }};
-    const qTopRight = scatterQuads.top_right || {{ quadrant_top_right|default:"[]"|safe }};
-    const qTopLeft = scatterQuads.top_left || {{ quadrant_top_left|default:"[]"|safe }};
-    const qBottomRight = scatterQuads.bottom_right || {{ quadrant_bottom_right|default:"[]"|safe }};
-    const qBottomLeft = scatterQuads.bottom_left || {{ quadrant_bottom_left|default:"[]"|safe }};
-    const rawScatter = {{ scatter_data|default:"[]"|safe }};
+            // REQUIREMENT 3: Scatter Plot Color Duplicates Fix (legend: display: false)
+            const scatterElem = document.getElementById('scatterChart');
+            if (scatterElem) {
+                const scatterQuads = {{ scatter_quadrants|default:"{}"|safe }};
+                const qTopRight = scatterQuads.top_right || {{ quadrant_top_right|default:"[]"|safe }};
+                const qTopLeft = scatterQuads.top_left || {{ quadrant_top_left|default:"[]"|safe }};
+                const qBottomRight = scatterQuads.bottom_right || {{ quadrant_bottom_right|default:"[]"|safe }};
+                const qBottomLeft = scatterQuads.bottom_left || {{ quadrant_bottom_left|default:"[]"|safe }};
+                const rawScatter = {{ scatter_data|default:"[]"|safe }};
 
-    let datasets = [];
+                let datasets = [];
 
-    if (qTopRight.length || qTopLeft.length || qBottomRight.length || qBottomLeft.length) {
-        datasets = [
-            { label: 'High Att / High Marks', data: qTopRight, backgroundColor: '#10B981', pointRadius: 6 },
-            { label: 'Low Att / High Marks', data: qTopLeft, backgroundColor: '#3B82F6', pointRadius: 6 },
-            { label: 'High Att / Low Marks', data: qBottomRight, backgroundColor: '#F59E0B', pointRadius: 6 },
-            { label: 'Low Att / Low Marks', data: qBottomLeft, backgroundColor: '#EF4444', pointRadius: 6 }
-        ];
-    } else {
-        datasets = [{
-            label: 'Students',
-            data: rawScatter,
-            backgroundColor: '#3B82F6',
-            pointRadius: 6
-        }];
-    }
+                if (qTopRight.length || qTopLeft.length || qBottomRight.length || qBottomLeft.length) {
+                    datasets = [
+                        { label: 'High Att / High Marks', data: qTopRight, backgroundColor: '#10B981', pointRadius: 6 },
+                        { label: 'Low Att / High Marks', data: qTopLeft, backgroundColor: '#3B82F6', pointRadius: 6 },
+                        { label: 'High Att / Low Marks', data: qBottomRight, backgroundColor: '#F59E0B', pointRadius: 6 },
+                        { label: 'Low Att / Low Marks', data: qBottomLeft, backgroundColor: '#EF4444', pointRadius: 6 }
+                    ];
+                } else {
+                    datasets = [{
+                        label: 'Students',
+                        data: rawScatter,
+                        backgroundColor: '#3B82F6',
+                        pointRadius: 6
+                    }];
+                }
 
-    new Chart(scatterElem.getContext('2d'), {
-        type: 'scatter',
-        data: { datasets: datasets },
-        options: {
-            responsive: true,
-            plugins: {
-                tooltip: {
-                    callbacks: {
-                        label: function(ctx) {
-                            return (ctx.raw.name || 'Student') + ': Att ' + ctx.raw.x + '%, Marks ' + ctx.raw.y + '%';
+                new Chart(scatterElem.getContext('2d'), {
+                    type: 'scatter',
+                    data: { datasets: datasets },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { display: false }, // Disables chart legend to prevent duplicate labels/colors
+                            tooltip: {
+                                callbacks: {
+                                    label: function(ctx) {
+                                        return (ctx.raw.name || 'Student') + ': Att ' + ctx.raw.x + '%, Marks ' + ctx.raw.y + '%';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { 
+                                title: { display: true, text: 'Attendance %', color: '#9CA3AF' }, 
+                                min: 0, 
+                                max: 100, 
+                                grid: { color: 'rgba(255,255,255,0.05)' }, 
+                                ticks: { color: '#9CA3AF' } 
+                            },
+                            y: { 
+                                title: { display: true, text: 'Marks %', color: '#9CA3AF' }, 
+                                min: 0, 
+                                max: 100, 
+                                grid: { color: 'rgba(255,255,255,0.05)' }, 
+                                ticks: { color: '#9CA3AF' } 
+                            }
                         }
                     }
-                }
-            },
-            scales: {
-                x: { 
-                    title: { display: true, text: 'Attendance %', color: '#9CA3AF' }, 
-                    min: 0, 
-                    max: 100, 
-                    grid: { color: 'rgba(255,255,255,0.05)' }, 
-                    ticks: { color: '#9CA3AF' } 
-                },
-                y: { 
-                    title: { display: true, text: 'Marks %', color: '#9CA3AF' }, 
-                    min: 0, 
-                    max: 100, 
-                    grid: { color: 'rgba(255,255,255,0.05)' }, 
-                    ticks: { color: '#9CA3AF' } 
-                }
+                });
             }
-        }
-    });
-}
         });
     </script>
     {% endif %}
 
+</div>
+
+<!-- REQUIREMENT 4: Excel History & Batch Deletion Modal -->
+<div class="modal fade" id="batchHistoryModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-white border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-clock-rotate-left text-info me-2"></i>Excel Upload History & Batch Management</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="table-responsive">
+                    <table class="table table-dark table-striped align-middle mb-0">
+                        <thead>
+                            <tr class="text-white small">
+                                <th>File Name</th>
+                                <th>Academic Scope</th>
+                                <th>Uploaded On</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for batch in excel_batches|default:None %}
+                            <tr>
+                                <td class="fw-semibold text-white"><i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}</td>
+                                <td><span class="badge bg-primary">{{ batch.academic_year|default:batch.year_scope|default:"All Years" }}</span></td>
+                                <td class="small text-muted">{{ batch.uploaded_at|date:"M d, Y H:i" }}</td>
+                                <td class="text-end">
+                                    <form method="POST" action="{% url 'students:delete_batch' batch.id %}" onsubmit="return confirm('Deleting this upload batch will clean up the associated academic records. Are you sure?');" class="d-inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-outline-danger btn-sm px-3">
+                                            <i class="fa-solid fa-trash me-1"></i> Delete Batch
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- MODAL: BULK 3-SHEET EXCEL UPLOAD -->

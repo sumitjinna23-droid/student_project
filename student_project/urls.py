@@ -39,6 +39,9 @@ urlpatterns = [
     # Django Admin Panel
     path('admin/', admin.site.urls),
     
+    # Include Django's built-in auth URLs for password reset views:
+    path('accounts/', include('django.contrib.auth.urls')),
+
     # Include all routes from the 'students' app
     path('', include('students.urls')),
 ]

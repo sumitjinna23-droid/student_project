@@ -2,6 +2,9 @@ import re
 import pandas as pd
 
 from django.shortcuts import render, redirect, get_object_or_404
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
 from django.contrib import messages
 from django.db.models import Avg, Q, Sum
 from django.db import transaction
@@ -82,7 +85,7 @@ def compute_smart_action_status(attendance_pct, academic_avg):
 
 
 # =========================================================
-# AUTHENTICATION & DASHBOARD VIEWS
+# AUTHENTICATION & PASSWORD RESET VIEWS
 # =========================================================
 
 def custom_login(request):
@@ -178,7 +181,8 @@ def first_time_setup(request):
         if len(password) < 6:
             messages.error(request, "Password must be at least 6 characters long.")
             return render(request, 'first_time_setup.html', {'email': email, 'role': role})
-        # Inside first_time_setup (for role == 'TEACHER'):
+
+        user = None
         if role == 'TEACHER':
             allowed_teacher = AllowedTeacher.objects.get(email__iexact=email)
             clean_email = email.lower()
@@ -186,44 +190,30 @@ def first_time_setup(request):
             user, _ = User.objects.get_or_create(username=clean_email)
             user.email = clean_email
             user.is_staff = True
-            user.is_superuser = True  # Grants full CRUD on Students, Marks, Achievements
+            user.is_superuser = True
 
-            # Sync full name properly into Django User model
             if hasattr(allowed_teacher, 'name') and allowed_teacher.name:
                 raw_name = allowed_teacher.name.strip()
-                # Remove "Prof." or "Prof" prefix before splitting to avoid empty last_name
                 clean_name = raw_name.replace('Prof.', '').replace('Prof', '').strip()
                 names = clean_name.split(' ', 1)
-                
                 user.first_name = f"Prof. {names[0]}"
                 user.last_name = names[1] if len(names) > 1 else ''
 
             user.set_password(password)
             user.save()
 
-    # Sync first_name and last_name for Django Admin header display
-            if allowed_teacher.name:
-              names = allowed_teacher.name.strip().split(' ', 1)
-              user.first_name = names[0]
-              user.last_name = names[1] if len(names) > 1 else ''
+            profile, _ = UserProfile.objects.get_or_create(user=user)
+            profile.role = UserProfile.Role.TEACHER
+            profile.college_email = clean_email
+            profile.save()
 
-        user.set_password(password)
-        user.save()
-            
+            allowed_teacher.is_registered = True
+            allowed_teacher.save()
 
-        profile, _ = UserProfile.objects.get_or_create(user=user)
-        profile.role = UserProfile.Role.TEACHER
-        profile.college_email = clean_email
-        profile.save()
+            messages.success(request, "Teacher account setup complete! Logging you in...")
 
-        allowed_teacher.is_registered = True
-        allowed_teacher.save()
-
-        messages.success(request, "Teacher account setup complete! Logging you in...")
-
-    elif role == 'STUDENT':
+        elif role == 'STUDENT':
             student_obj = Student.objects.get(roll_number__iexact=roll_number)
-            
             clean_username = student_obj.roll_number.lower()
             clean_email = email.lower()
 
@@ -241,21 +231,83 @@ def first_time_setup(request):
 
             messages.success(request, "Student account setup complete! Logging you in...")
 
-    request.session.pop('setup_email', None)
-    request.session.pop('setup_role', None)
-    request.session.pop('setup_roll', None)
-    login(request, user)
-    if role == 'STUDENT':
-        return redirect('students:student_dashboard')
-        return redirect('students:analytics_dashboard')
+        request.session.pop('setup_email', None)
+        request.session.pop('setup_role', None)
+        request.session.pop('setup_roll', None)
+        
+        if user:
+            login(request, user)
+            if role == 'STUDENT':
+                return redirect('students:student_dashboard')
+            return redirect('students:analytics_dashboard')
 
     return render(request, 'first_time_setup.html', {'email': email, 'role': role})
 
+
+# students/views.py
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.contrib.auth.models import User
+from django.db.models import Q
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+
+def password_reset_request(request):
+    """Finds the user by username or email and stores their ID in the session for direct reset."""
+    if request.method == "POST":
+        input_value = request.POST.get('username_or_email', '').strip()
+        
+        user = User.objects.filter(
+            Q(username__iexact=input_value) | Q(email__iexact=input_value)
+        ).first()
+
+        if user:
+            # Store user ID in session for the next step
+            request.session['reset_user_id'] = user.id
+            return redirect('students:password_reset_confirm')
+        else:
+            messages.error(request, "No account found with that Roll Number or Email.")
+            
+    return render(request, 'students/password_reset_request.html')
+
+def password_reset_confirm(request):
+    """Validates the session and updates the user's password directly."""
+    user_id = request.session.get('reset_user_id')
+    if not user_id:
+        return render(request, 'password_reset_confirm.html', {'validlink': False})
+
+    user = get_object_or_404(User, id=user_id)
+
+    if request.method == 'POST':
+        password = request.POST.get('password')
+        confirm_password = request.POST.get('confirm_password')
+
+        if password != confirm_password:
+            messages.error(request, "Passwords do not match.")
+            return render(request, 'password_reset_confirm.html', {'validlink': True})
+
+        if len(password) < 6:
+            messages.error(request, "Password must be at least 6 characters long.")
+            return render(request, 'password_reset_confirm.html', {'validlink': True})
+
+        user.set_password(password)
+        user.save()
+        
+        request.session.pop('reset_user_id', None)
+        messages.success(request, "Password updated successfully! You can now log in.")
+        return redirect('students:login')
+
+    return render(request, 'students/password_reset_confirm.html', {'validlink': True})
 
 def custom_logout(request):
     logout(request)
     return redirect('students:login')
 
+
+# =========================================================
+# DASHBOARD VIEWS & ACHIEVEMENTS MANAGEMENT
+# =========================================================
 
 @login_required(login_url='students:login')
 def student_dashboard(request):
@@ -268,6 +320,7 @@ def student_dashboard(request):
         Q(roll_number__iexact=user_identifier)
     ).first()
 
+    # REQ 2: Full Achievement Depth Context
     achievements = list(student.achievements.all()) if student else []
 
     scatter_data = []
@@ -334,6 +387,33 @@ def student_dashboard(request):
         })
 
     return render(request, 'student_dashboard.html', context)
+
+
+@login_required
+def add_achievement(request, student_id=None):
+    """REQ 2: Achievement creation logic."""
+    if request.method == 'POST':
+        title = request.POST.get('title', '').strip()
+        description = request.POST.get('description', '').strip()
+        category = request.POST.get('category', 'ACADEMIC')
+        date_awarded = request.POST.get('date_awarded')
+
+        if student_id:
+            student = get_object_or_404(Student, id=student_id)
+        else:
+            student = getattr(request.user.profile, 'student', None)
+
+        if student and title:
+            Achievement.objects.create(
+                student=student,
+                title=title,
+                description=description,
+                category=category,
+                date_achieved=date_awarded if date_awarded else None
+            )
+            messages.success(request, "Achievement added successfully!")
+
+    return redirect(request.META.get('HTTP_REFERER', 'students:student_dashboard'))
 
 
 # =========================================================
@@ -509,6 +589,9 @@ def analytics_dashboard(request):
 
     subjects = Subject.objects.all()
 
+    # Fetch upload batch history (replace `ExcelBatch.objects.all()` with your actual Model name if different, e.g., UploadHistory.objects.all())
+    uploaded_files_qs = ExcelBatch.objects.all() if 'ExcelBatch' in globals() else []
+
     context = {
         'subjects': subjects,
         'user_display_name': get_user_display_name(request.user),
@@ -517,6 +600,8 @@ def analytics_dashboard(request):
         'years': YEAR_CHOICES,
         'search_query': search_query,
         'is_student_mode': False,
+        'uploaded_files': uploaded_files_qs,
+        'excel_batches': uploaded_files_qs,
     }
 
     if selected_student_id or search_query:
@@ -592,7 +677,11 @@ def analytics_dashboard(request):
 
             smart_action = compute_smart_action_status(overall_att, overall_academic_avg)
 
+            # REQ 2: Full Achievement Depth Context for Dossier View
+            achievements = list(student.achievements.all())
+
             context.update({
+                'achievements': achievements,
                 'subject_performances': subject_performances,
                 'subject_attendances': subject_attendances,
                 'overall_academic_avg': overall_academic_avg,
@@ -677,7 +766,17 @@ def analytics_dashboard(request):
 
         action_status = compute_smart_action_status(att_val, st_avg)
 
-        st_point = {'x': att_val, 'y': st_avg, 'name': st.name, 'roll': st.roll_number}
+        color = "#28a745" if (att_val >= 75 and st_avg >= 50) else "#ffc107" if (att_val < 75 and st_avg >= 50) else "#fd7e14" if (att_val >= 75 and st_avg < 50) else "#dc3545"
+        quadrant = "Stars" if (att_val >= 75 and st_avg >= 50) else "Potential" if (att_val < 75 and st_avg >= 50) else "High Effort" if (att_val >= 75 and st_avg < 50) else "Critical"
+
+        st_point = {
+            'x': att_val, 
+            'y': st_avg, 
+            'name': st.name, 
+            'roll': st.roll_number,
+            'color': color,
+            'quadrant': quadrant
+        }
 
         if att_val >= 75.0 and st_avg >= 50.0:
             quadrant_top_right.append(st_point)
@@ -704,7 +803,14 @@ def analytics_dashboard(request):
     department_toppers = sorted(master_student_roster, key=lambda x: x['avg_marks'], reverse=True)[:5]
     bottom_remedial_roster = sorted(master_student_roster, key=lambda x: x['risk'], reverse=True)[:5]
 
-    scatter_data = [{'x': item['attendance'], 'y': item['avg_marks'], 'name': item['student'].name} for item in master_student_roster]
+    scatter_data = [
+        {
+            'x': item['attendance'], 
+            'y': item['avg_marks'], 
+            'name': item['student'].name,
+            'color': "#28a745" if (item['attendance'] >= 75 and item['avg_marks'] >= 50) else "#ffc107" if (item['attendance'] < 75 and item['avg_marks'] >= 50) else "#fd7e14" if (item['attendance'] >= 75 and item['avg_marks'] < 50) else "#dc3545"
+        } for item in master_student_roster
+    ]
 
     context.update({
         'total_students': total_st,
@@ -739,8 +845,9 @@ def analytics_dashboard(request):
 
 
 # =========================================================
-# MULTI-SHEET EXCEL BULK INGESTION VIEW
+# MULTI-SHEET EXCEL BULK INGESTION & DATA MANAGEMENT VIEWS
 # =========================================================
+
 @login_required
 def upload_excel_view(request):
     if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
@@ -879,3 +986,41 @@ def upload_excel_view(request):
             messages.error(request, f"Import error: {str(e)}")
 
     return render(request, 'students/upload_excel.html')
+
+
+@login_required
+def upload_history(request):
+    """REQ 4: Upload History and Batch Summary tracking view."""
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+        messages.error(request, "Access denied.")
+        return redirect('students:student_dashboard')
+
+    year_summaries = []
+    for year_code, year_label in YEAR_CHOICES:
+        count = Student.objects.filter(year=year_code).count()
+        year_summaries.append({
+            'code': year_code,
+            'label': year_label,
+            'student_count': count
+        })
+
+    return render(request, 'students/upload_history.html', {'year_summaries': year_summaries})
+
+
+@login_required
+def delete_year_data(request, year_code):
+    """REQ 4: Purge all student data associated with a specific Academic Year."""
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+        messages.error(request, "Access denied.")
+        return redirect('students:student_dashboard')
+
+    if request.method == 'POST':
+        students_to_delete = Student.objects.filter(year=year_code)
+        count = students_to_delete.count()
+
+        with transaction.atomic():
+            students_to_delete.delete()
+
+        messages.success(request, f"Successfully purged all data for Year '{year_code}' ({count} students removed).")
+
+    return redirect('students:upload_history')

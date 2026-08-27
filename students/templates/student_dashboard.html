@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Student Academic Portal</title>
+    <!-- Font Awesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         body { 
             background-color: #0b0f19; 
@@ -22,6 +24,11 @@
         }
         .user-welcome-title { margin: 0; color: #ffffff; }
         .user-welcome-sub { color: #94a3b8; font-size: 0.9rem; }
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
         .card { 
             background-color: #131b2e; 
             border: 1px solid #1e293b; 
@@ -78,38 +85,101 @@
         .badge-danger { background-color: #7f1d1d; color: #fca5a5; }
         .unit-strong { color: #34d399; font-weight: 500; }
         .unit-weak { color: #fbbf24; font-weight: 500; }
-        .logout-btn { 
-            background-color: #ef4444; 
-            color: white; 
+        .btn {
             padding: 8px 16px; 
             text-decoration: none; 
             border-radius: 6px; 
             font-weight: bold; 
+            font-size: 13px;
+            cursor: pointer;
+            border: none;
+            display: inline-block;
             transition: background 0.2s;
         }
+        .logout-btn { background-color: #ef4444; color: white; }
         .logout-btn:hover { background-color: #dc2626; }
-        .achievement-card {
-            background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            border-radius: 8px;
-            padding: 20px;
+        .reset-btn { background-color: #3b82f6; color: white; }
+        .reset-btn:hover { background-color: #2563eb; }
+        .delete-btn { background-color: #991b1b; color: #fca5a5; padding: 4px 8px; font-size: 12px; }
+        .delete-btn:hover { background-color: #7f1d1d; }
+
+        /* Updated Achievement Section Styles matching Reference Dashboard */
+        .achievement-card-container {
+            background-color: #0d1322;
+            border: 1px solid #d97706;
+            border-radius: 10px;
+            padding: 24px;
             margin-bottom: 25px;
         }
+        .achievement-card-title {
+            color: #eab308;
+            font-size: 1.25rem;
+            font-weight: 700;
+            margin: 0 0 20px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .achievement-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 16px;
+        }
+        .achievement-box {
+            background-color: #131b2e;
+            border: 1px solid #d97706;
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .achievement-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
         .achievement-badge {
-            background-color: rgba(245, 158, 11, 0.15);
-            color: #fde047;
-            border: 1px solid rgba(245, 158, 11, 0.4);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 13px;
-            display: inline-block;
-            margin: 4px;
+            background-color: #eab308;
+            color: #0f172a;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 6px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .achievement-date {
+            color: #eab308;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .achievement-item-title {
+            color: #ffffff;
+            font-size: 1.05rem;
+            font-weight: 700;
+            margin: 4px 0 0 0;
+        }
+        .achievement-item-desc {
+            color: #94a3b8;
+            font-size: 0.875rem;
+            margin: 0;
+            line-height: 1.4;
+        }
+        .no-achievements {
+            color: #64748b;
+            font-size: 0.9rem;
+            margin: 0;
         }
     </style>
 </head>
 <body>
 
-    <!-- Unified Clean Navigation Header -->
+    <!-- Header Navigation -->
     <div class="header">
         <div>
             <h2 class="user-welcome-title">Student Academic Portal</h2>
@@ -127,7 +197,10 @@
                 {% if student.roll_number %}(Roll Number: {{ student.roll_number }}){% endif %}
             </div>
         </div>
-        <a href="{% url 'students:logout' %}" class="logout-btn">Log Out</a>
+        <div class="header-actions">
+            <a href="{% url 'password_reset' %}" class="btn reset-btn">Reset Password</a>
+            <a href="{% url 'students:logout' %}" class="btn logout-btn">Log Out</a>
+        </div>
     </div>
 
     <!-- KPI Summary Cards -->
@@ -146,25 +219,37 @@
         </div>
     </div>
 
-    <!-- Smart Achievement Display Logic (Rendered ONLY if data exists) -->
-    {% if achievements or student.achievements.all %}
-    <div class="achievement-card">
-        <h3 style="color: #f59e0b; margin-top: 0; display: flex; align-items: center; gap: 8px;">
-            <span>🏆</span> Recognized Achievements & Honors
+    <!-- Recognized Honors & Student Achievements Section -->
+    <div class="achievement-card-container">
+        <h3 class="achievement-card-title">
+            <i class="fa-solid fa-trophy"></i> Recognized Honors & Student Achievements
         </h3>
-        <div style="margin-top: 10px;">
-            {% if achievements %}
-                {% for badge in achievements %}
-                    <span class="achievement-badge">✨ {{ badge }}</span>
+        
+        <div class="achievement-grid">
+            {% if achievements or student.achievements.all %}
+                {% for item in achievements|default:student.achievements.all %}
+                    <div class="achievement-box">
+                        <div class="achievement-meta">
+                            <span class="achievement-badge">
+                                <i class="fa-solid fa-star"></i> {{ item.category|default:"Honor / Award" }}
+                            </span>
+                            {% if item.date_achieved %}
+                                <span class="achievement-date">
+                                    <i class="fa-regular fa-calendar"></i> {{ item.date_achieved|date:"b d, Y" }}
+                                </span>
+                            {% endif %}
+                        </div>
+                        <h4 class="achievement-item-title">{{ item.title }}</h4>
+                        {% if item.description %}
+                            <p class="achievement-item-desc">{{ item.description }}</p>
+                        {% endif %}
+                    </div>
                 {% endfor %}
             {% else %}
-                {% for badge in student.achievements.all %}
-                    <span class="achievement-badge">✨ {{ badge.title }}</span>
-                {% endfor %}
+                <p class="no-achievements">No achievements currently recorded for this student.</p>
             {% endif %}
         </div>
     </div>
-    {% endif %}
 
     <!-- 1. Subject Performance & AI Recommendations -->
     <div class="card">
@@ -286,6 +371,44 @@
             </tbody>
         </table>
     </div>
+
+    <!-- 4. Excel Sheet Upload History & Academic Year Deletion Management -->
+    {% if request.user.is_staff or is_teacher %}
+    <div class="card">
+        <h3 style="color: #38bdf8; margin-top: 0;">📂 Academic Year Excel History & Data Management</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Academic Year</th>
+                    <th>File Name</th>
+                    <th>Uploaded Date</th>
+                    <th>Uploaded By</th>
+                    <th>Records Imported</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for batch in excel_batches %}
+                <tr>
+                    <td><strong>{{ batch.academic_year }}</strong></td>
+                    <td>{{ batch.filename }}</td>
+                    <td>{{ batch.uploaded_at|date:"Y-m-d H:i" }}</td>
+                    <td>{{ batch.uploaded_by.username|default:"System" }}</td>
+                    <td>{{ batch.record_count|default:"-" }}</td>
+                    <td>
+                        <form method="POST" action="{% url 'delete_excel_batch' batch.id %}" style="display:inline;" onsubmit="return confirm('Deleting this batch will erase all academic records for this year. Continue?');">
+                            {% csrf_token %}
+                            <button type="submit" class="btn delete-btn">Delete Batch Data</button>
+                        </form>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="6" style="text-align: center; padding: 20px;">No batch history or uploaded sheets found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
 
 </body>
 </html>

@@ -395,3 +395,25 @@ class AllowedTeacher(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.email})" if self.name else self.email
+
+# =========================================================
+# 8. EXCEL FILE HISTORY & BATCH TRACKING MODEL
+# =========================================================
+class UploadedExcelBatch(models.Model):
+    filename = models.CharField(max_length=255)
+    year = models.CharField(max_length=10, choices=YEAR_CHOICES, default='FY')
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def delete_associated_records(self):
+        """
+        Deletes all academic marks and attendance data for students in this academic year
+        so teachers can clear out previous academic year data cleanly.
+        """
+        students_in_year = Student.objects.filter(year=self.year)
+        Marks.objects.filter(student__in=students_in_year).delete()
+        SubjectAttendance.objects.filter(student__in=students_in_year).delete()
+        self.delete()
+
+    def __str__(self):
+        return f"{self.filename} ({self.get_year_display()}) - {self.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
