@@ -11,6 +11,7 @@ from django.db import transaction
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from .models import ExcelBatch
 
 from .models import Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement
 from .utils import (
@@ -377,6 +378,8 @@ def student_dashboard(request):
 
         subject_count = len(subject_performances)
         overall_academic_avg = round(total_percentage_sum / subject_count, 1) if subject_count else 0.0
+        # Fetch student achievements
+        achievements = list(student.achievements.all())
 
         context.update({
             'subject_performances': subject_performances,
@@ -575,6 +578,10 @@ def analytics_dashboard(request):
 
                     records_created += 1
 
+            ExcelBatch.objects.create(
+                filename=uploaded_file.name,
+                academic_year=request.POST.get('year', 'General')
+            )
             messages.success(request, f"Success! Imported/Updated {records_created} student records.")
             return redirect('/dashboard/')
 
@@ -602,6 +609,8 @@ def analytics_dashboard(request):
         'is_student_mode': False,
         'uploaded_files': uploaded_files_qs,
         'excel_batches': uploaded_files_qs,
+        'achievements': [],
+        'has_achievements': False,
     }
 
     if selected_student_id or search_query:
@@ -676,6 +685,8 @@ def analytics_dashboard(request):
                 ai_rec_text += f" {primary_ai.get('anomaly_msg')}"
 
             smart_action = compute_smart_action_status(overall_att, overall_academic_avg)
+            # Fetch student achievements
+            achievements = list(student.achievements.all())
 
             # REQ 2: Full Achievement Depth Context for Dossier View
             achievements = list(student.achievements.all())
@@ -698,6 +709,8 @@ def analytics_dashboard(request):
                 'ai_copilot_recommendation': ai_rec_text,
                 'chart_subject_labels': [s['subject'] for s in subject_performances],
                 'chart_subject_scores': [s['percentage'] for s in subject_performances],
+                'achievements': achievements,
+                'has_achievements': len(achievements) > 0,
             })
 
             return render(request, 'students/dashboard.html', context)
@@ -1022,5 +1035,20 @@ def delete_year_data(request, year_code):
             students_to_delete.delete()
 
         messages.success(request, f"Successfully purged all data for Year '{year_code}' ({count} students removed).")
+
+    return redirect('students:upload_history')
+
+@login_required
+def delete_excel_batch(request, batch_id):
+    """REQ 1: Delete specific Excel Workbook entry and its logged metadata."""
+    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+        messages.error(request, "Access denied.")
+        return redirect('students:student_dashboard')
+
+    if request.method == 'POST':
+        batch = get_object_or_404(ExcelBatch, id=batch_id)
+        filename = batch.filename
+        batch.delete()
+        messages.success(request, f"Excel workbook batch '{filename}' successfully deleted.")
 
     return redirect('students:upload_history')

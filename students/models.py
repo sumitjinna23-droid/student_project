@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+import os
 
 # =========================================================
 # CHOICES & CONSTANTS
@@ -396,20 +397,25 @@ class AllowedTeacher(models.Model):
     def __str__(self):
         return f"{self.name} ({self.email})" if self.name else self.email
 
+
 # =========================================================
 # 8. EXCEL FILE HISTORY & BATCH TRACKING MODEL
 # =========================================================
 class UploadedExcelBatch(models.Model):
     filename = models.CharField(max_length=255)
+    file = models.FileField(upload_to='excel_uploads/', null=True, blank=True)
     year = models.CharField(max_length=10, choices=YEAR_CHOICES, default='FY')
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def delete_associated_records(self):
         """
-        Deletes all academic marks and attendance data for students in this academic year
-        so teachers can clear out previous academic year data cleanly.
+        Deletes all academic marks, attendance data, the saved physical file,
+        and removes this record.
         """
+        if self.file and os.path.isfile(self.file.path):
+            os.remove(self.file.path)
+            
         students_in_year = Student.objects.filter(year=self.year)
         Marks.objects.filter(student__in=students_in_year).delete()
         SubjectAttendance.objects.filter(student__in=students_in_year).delete()
@@ -417,3 +423,18 @@ class UploadedExcelBatch(models.Model):
 
     def __str__(self):
         return f"{self.filename} ({self.get_year_display()}) - {self.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+class ExcelBatch(models.Model):
+    filename = models.CharField(max_length=255)
+    file = models.FileField(upload_to='excel_batches/', null=True, blank=True)
+    academic_year = models.CharField(max_length=50, blank=True, null=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def delete(self, *args, **kwargs):
+        if self.file and os.path.isfile(self.file.path):
+            os.remove(self.file.path)
+        super().delete(*args, **kwargs)
+
+    def __str__(self):
+        return self.filename

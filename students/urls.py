@@ -28,4 +28,6 @@ urlpatterns = [
     path('upload-excel/', views.upload_excel_view, name='upload_excel'),
     path('upload-history/', views.upload_history, name='upload_history'),
     path('delete-year-data/<str:year_code>/', views.delete_year_data, name='delete_year_data'),
+
+    path('upload-history/delete-batch/<int:batch_id>/', views.delete_excel_batch, name='delete_excel_batch'),
 ]
