@@ -1,7 +1,8 @@
+# students/models.py
 from django.db import models
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 import os
+from django.db import transaction
 
 # =========================================================
 # CHOICES & CONSTANTS
@@ -45,6 +46,9 @@ class Student(models.Model):
     programme = models.CharField(max_length=20, choices=PROGRAMME_CHOICES, default='BSC')
     part = models.CharField(max_length=10, choices=PART_CHOICES, default='FY')
     year = models.CharField(max_length=10, choices=YEAR_CHOICES, default='FY')
+
+    # Batch-tracking: which ExcelBatch created this student (nullable)
+    created_in_batch = models.ForeignKey('ExcelBatch', null=True, blank=True, on_delete=models.SET_NULL, related_name='created_students')
 
     def auto_assign_year_from_roll(self):
         """
@@ -211,6 +215,9 @@ class Marks(models.Model):
     weakest_unit = models.CharField(max_length=100, blank=True)
     strongest_unit = models.CharField(max_length=100, blank=True)
 
+    # Track which Excel batch created/updated this marks row
+    excel_batch = models.ForeignKey('ExcelBatch', null=True, blank=True, on_delete=models.SET_NULL, related_name='marks_batch')
+
     class Meta:
         unique_together = ('student', 'subject', 'semester')
 
@@ -287,20 +294,17 @@ class Marks(models.Model):
 # 4. SUBJECT-WISE ATTENDANCE MODEL
 # =========================================================
 class SubjectAttendance(models.Model):
-    """
-    Stores subject-specific Theory & Practical attendance counts and calculates percentages.
-    """
     student = models.ForeignKey(Student, on_delete=models.CASCADE, related_name='subject_attendances')
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE)
     semester = models.IntegerField(default=1)
 
-    # Theory Class Counts
     theory_total = models.IntegerField(default=0)
     theory_attended = models.IntegerField(default=0)
-
-    # Practical Class Counts
     practical_total = models.IntegerField(default=0)
     practical_attended = models.IntegerField(default=0)
+
+    # Track which Excel batch created/updated this attendance row
+    excel_batch = models.ForeignKey('ExcelBatch', null=True, blank=True, on_delete=models.SET_NULL, related_name='attendance_batch')
 
     class Meta:
         unique_together = ('student', 'subject', 'semester')
@@ -387,7 +391,7 @@ class Achievement(models.Model):
 
 
 # =========================================================
-# 7. AUTHORIZED TEACHERS (WHITELIST FOR TESTING & PRODUCTION)
+# 7. AUTHORIZED TEACHERS (WHITELIST)
 # =========================================================
 class AllowedTeacher(models.Model):
     email = models.EmailField(unique=True)
@@ -401,40 +405,57 @@ class AllowedTeacher(models.Model):
 # =========================================================
 # 8. EXCEL FILE HISTORY & BATCH TRACKING MODEL
 # =========================================================
-class UploadedExcelBatch(models.Model):
-    filename = models.CharField(max_length=255)
-    file = models.FileField(upload_to='excel_uploads/', null=True, blank=True)
-    year = models.CharField(max_length=10, choices=YEAR_CHOICES, default='FY')
-    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    uploaded_at = models.DateTimeField(auto_now_add=True)
-
-    def delete_associated_records(self):
-        """
-        Deletes all academic marks, attendance data, the saved physical file,
-        and removes this record.
-        """
-        if self.file and os.path.isfile(self.file.path):
-            os.remove(self.file.path)
-            
-        students_in_year = Student.objects.filter(year=self.year)
-        Marks.objects.filter(student__in=students_in_year).delete()
-        SubjectAttendance.objects.filter(student__in=students_in_year).delete()
-        self.delete()
-
-    def __str__(self):
-        return f"{self.filename} ({self.get_year_display()}) - {self.uploaded_at.strftime('%Y-%m-%d %H:%M')}"
-
-
 class ExcelBatch(models.Model):
     filename = models.CharField(max_length=255)
     file = models.FileField(upload_to='excel_batches/', null=True, blank=True)
     academic_year = models.CharField(max_length=50, blank=True, null=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
+    # Optional helper: number of records processed by this batch
+    record_count = models.IntegerField(null=True, blank=True)
+
+    def delete_associated_records(self):
+        """
+        Delete Marks, SubjectAttendance, Students created by this batch,
+        remove saved file, then delete batch — all inside transaction.
+        """
+        with transaction.atomic():
+            # delete marks and attendance rows that reference this batch
+            Marks.objects.filter(excel_batch=self).delete()
+            SubjectAttendance.objects.filter(excel_batch=self).delete()
+
+            # delete students created by this batch (cascade deletes marks/attendance)
+            Student.objects.filter(created_in_batch=self).delete()
+
+            # delete stored file if present
+            if self.file and os.path.isfile(self.file.path):
+                try:
+                    os.remove(self.file.path)
+                except Exception:
+                    pass
+
+            # finally remove the batch row itself
+            super().delete()
+
+    # Backwards compatibility alias for templates expecting file_name
+    @property
+    def file_name(self):
+        return self.filename
+
+    # Backwards compatibility alias for year_scope
+    @property
+    def year_scope(self):
+        return self.academic_year or ''
 
     def delete(self, *args, **kwargs):
+        # remove file if present before delete
         if self.file and os.path.isfile(self.file.path):
-            os.remove(self.file.path)
+            try:
+                os.remove(self.file.path)
+            except Exception:
+                pass
         super().delete(*args, **kwargs)
 
     def __str__(self):
         return self.filename
+    

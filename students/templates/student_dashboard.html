@@ -219,36 +219,33 @@
     </div>
 
     <!-- Recognized Honors & Student Achievements Section -->
+    {% if achievements %}
     <div class="achievement-card-container">
         <h3 class="achievement-card-title">
             <i class="fa-solid fa-trophy"></i> Recognized Honors & Student Achievements
         </h3>
-        
         <div class="achievement-grid">
-            {% if achievements or student.achievements.all %}
-                {% for item in achievements|default:student.achievements.all %}
-                    <div class="achievement-box">
-                        <div class="achievement-meta">
-                            <span class="achievement-badge">
-                                <i class="fa-solid fa-star"></i> {{ item.category|default:"Honor / Award" }}
+            {% for item in achievements %}
+                <div class="achievement-box">
+                    <div class="achievement-meta">
+                        <span class="achievement-badge">
+                            <i class="fa-solid fa-star"></i> {{ item.category|default:"Honor / Award" }}
+                        </span>
+                        {% if item.date_achieved %}
+                            <span class="achievement-date">
+                                <i class="fa-regular fa-calendar"></i> {{ item.date_achieved|date:"b d, Y" }}
                             </span>
-                            {% if item.date_achieved %}
-                                <span class="achievement-date">
-                                    <i class="fa-regular fa-calendar"></i> {{ item.date_achieved|date:"b d, Y" }}
-                                </span>
-                            {% endif %}
-                        </div>
-                        <h4 class="achievement-item-title">{{ item.title }}</h4>
-                        {% if item.description %}
-                            <p class="achievement-item-desc">{{ item.description }}</p>
                         {% endif %}
                     </div>
-                {% endfor %}
-            {% else %}
-                <p class="no-achievements">No achievements currently recorded for this student.</p>
-            {% endif %}
+                    <h4 class="achievement-item-title">{{ item.title }}</h4>
+                    {% if item.description %}
+                        <p class="achievement-item-desc">{{ item.description }}</p>
+                    {% endif %}
+                </div>
+            {% endfor %}
         </div>
     </div>
+    {% endif %}
 
     <!-- 1. Subject Performance & AI Recommendations -->
     <div class="card">
@@ -395,7 +392,7 @@
                     <td>{{ batch.uploaded_by.username|default:"System" }}</td>
                     <td>{{ batch.record_count|default:"-" }}</td>
                     <td>
-                        <form method="POST" action="{% url 'delete_excel_batch' batch.id %}" style="display:inline;" onsubmit="return confirm('Deleting this batch will erase all academic records for this year. Continue?');">
+                        <form method="POST" action="{% url 'students:delete_excel_batch' batch.id %}" style="display:inline;" onsubmit="return confirm('Deleting this batch will erase all academic records for this year. Continue?');">
                             {% csrf_token %}
                             <button type="submit" class="btn delete-btn">Delete Batch Data</button>
                         </form>

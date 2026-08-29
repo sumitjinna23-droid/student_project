@@ -1,19 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>Academic Operating System & AI Command Center</title>
-    
+
     <!-- Fonts & CSS -->
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    
+
     <!-- JS Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
-    
+
     <style>
         :root {
             --bg-base: #0B0F19;
@@ -112,7 +112,6 @@
             </span>
         </div>
         <div class="d-flex gap-2 align-items-center">
-            <!-- REQUIREMENT 1: Password Reset Integration -->
             <a href="{% url 'students:logout' %}" class="btn btn-outline-danger btn-sm fw-bold px-3">
                 <i class="fa-solid fa-right-from-bracket me-1"></i> Log Out
             </a>
@@ -160,9 +159,9 @@
             <i class="fa-solid fa-gear"></i> Admin Panel
         </a>
 
-        <!-- Excel History & Deletion Trigger -->
+        <!-- CHANGED: Label to "History" (was "Batch History") -->
         <button class="btn btn-outline-info fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#batchHistoryModal">
-            <i class="fa-solid fa-clock-rotate-left"></i> Batch History
+            <i class="fa-solid fa-clock-rotate-left"></i> History
         </button>
 
         <!-- Upload Button -->
@@ -870,12 +869,12 @@
 
 </div>
 
-<!-- REQUIREMENT 4: Excel History & Batch Deletion Modal -->
+<!-- REQUIREMENT 4: Simplified History Modal (File Name + Delete) -->
 <div class="modal fade" id="batchHistoryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark text-white border-secondary">
             <div class="modal-header border-secondary">
-                <h5 class="modal-title fw-bold"><i class="fa-solid fa-clock-rotate-left text-info me-2"></i>Excel Upload History & Batch Management</h5>
+                <h5 class="modal-title fw-bold"><i class="fa-solid fa-clock-rotate-left text-info me-2"></i>History</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -884,29 +883,27 @@
                         <thead>
                             <tr class="text-white small">
                                 <th>File Name</th>
-                                <th>Academic Scope</th>
-                                <th>Uploaded On</th>
                                 <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for batch in excel_batches|default:None %}
                             <tr>
-                                <td class="fw-semibold text-white"><i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}</td>
-                                <td><span class="badge bg-primary">{{ batch.academic_year|default:batch.year_scope|default:"All Years" }}</span></td>
-                                <td class="small text-muted">{{ batch.uploaded_at|date:"M d, Y H:i" }}</td>
+                                <td class="fw-semibold text-white">
+                                    <i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}
+                                </td>
                                 <td class="text-end">
-                                    <form method="POST" action="{% url 'students:delete_batch' batch.id %}" onsubmit="return confirm('Deleting this upload batch will clean up the associated academic records. Are you sure?');" class="d-inline">
+                                    <form method="POST" action="{% url 'students:delete_excel_batch' batch.id %}" onsubmit="return confirm('Deleting this upload batch will clean up the associated academic records. Are you sure?');" class="d-inline">
                                         {% csrf_token %}
                                         <button type="submit" class="btn btn-outline-danger btn-sm px-3">
-                                            <i class="fa-solid fa-trash me-1"></i> Delete Batch
+                                            <i class="fa-solid fa-trash me-1"></i> Delete
                                         </button>
                                     </form>
                                 </td>
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="4" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
+                                <td colspan="2" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -969,7 +966,7 @@
             html2canvas:  { scale: 2, useCORS: true },
             jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
         };
-        
+
         html2pdf().set(opt).from(element).save().then(() => {
             if (btn) {
                 btn.innerHTML = originalText;

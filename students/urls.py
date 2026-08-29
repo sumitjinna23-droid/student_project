@@ -29,5 +29,7 @@ urlpatterns = [
     path('upload-history/', views.upload_history, name='upload_history'),
     path('delete-year-data/<str:year_code>/', views.delete_year_data, name='delete_year_data'),
 
+    # Deletion routes for Excel batches (two route patterns / alias names provided so templates/legacy links work)
     path('upload-history/delete-batch/<int:batch_id>/', views.delete_excel_batch, name='delete_excel_batch'),
+    path('delete-batch/<int:batch_id>/', views.delete_excel_batch, name='delete_batch'),
 ]

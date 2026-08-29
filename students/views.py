@@ -1,3 +1,4 @@
+# students/views.py
 import re
 import pandas as pd
 
@@ -12,8 +13,9 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from .models import ExcelBatch
-
-from .models import Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement
+from .models import (
+    Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement
+)
 from .utils import (
     map_dataframe_columns, 
     parse_year_from_roll, 
@@ -364,8 +366,8 @@ def student_dashboard(request):
             ai_analysis = analyze_student_performance(m, overall_att)
 
             if isinstance(ai_analysis, dict):
-                ai_analysis.setdefault('strongest_unit', m.strongest_unit or 'Unit 1')
-                ai_analysis.setdefault('weakest_unit', m.weakest_unit or 'Unit 3')
+                ai_analysis.setdefault('strongest_unit', getattr(m, 'strongest_unit', 'Unit 1'))
+                ai_analysis.setdefault('weakest_unit', getattr(m, 'weakest_unit', 'Unit 3'))
                 ai_analysis.setdefault('remedial_plan', 'Assign practice sheets.')
 
             subject_performances.append({
@@ -378,8 +380,6 @@ def student_dashboard(request):
 
         subject_count = len(subject_performances)
         overall_academic_avg = round(total_percentage_sum / subject_count, 1) if subject_count else 0.0
-        # Fetch student achievements
-        achievements = list(student.achievements.all())
 
         context.update({
             'subject_performances': subject_performances,
@@ -387,6 +387,7 @@ def student_dashboard(request):
             'overall_academic_avg': overall_academic_avg,
             'overall_att': overall_att,
             'total_subjects_evaluated': subject_count,
+            'achievements': achievements,
         })
 
     return render(request, 'student_dashboard.html', context)
@@ -433,6 +434,13 @@ def analytics_dashboard(request):
         uploaded_file = request.FILES['excel_file']
 
         try:
+            # Create ExcelBatch BEFORE processing so we can attach it to records
+            excel_batch = ExcelBatch.objects.create(
+                filename=uploaded_file.name,
+                academic_year=request.POST.get('year', 'General'),
+                uploaded_by=request.user if request.user.is_authenticated else None
+            )
+
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
             else:
@@ -449,10 +457,14 @@ def analytics_dashboard(request):
                         if not roll or roll.lower() == 'nan':
                             continue
                         
-                        student_obj, _ = Student.objects.get_or_create(
+                        student_obj, created = Student.objects.get_or_create(
                             roll_number=roll,
-                            defaults={'name': f"Student {roll}"}
+                            defaults={'name': f"Student {roll}", 'created_in_batch': excel_batch}
                         )
+                        if created:
+                            # already set created_in_batch via defaults
+                            pass
+                        
                         subj_name = str(row['Subject']).strip()
                         subject_obj, _ = Subject.objects.get_or_create(name=subj_name)
 
@@ -464,9 +476,13 @@ def analytics_dashboard(request):
                                 'theory_attended': int(clean_val(row['Attended Theory']) or 0),
                                 'practical_total': int(clean_val(row['Total Practical']) or 0),
                                 'practical_attended': int(clean_val(row['Attended Practical']) or 0),
+                                'excel_batch': excel_batch
                             }
                         )
                         records_created += 1
+
+                excel_batch.record_count = records_created
+                excel_batch.save()
 
                 messages.success(request, f"Streamlined attendance uploaded for {records_created} records!")
                 return redirect('/dashboard/')
@@ -477,6 +493,7 @@ def analytics_dashboard(request):
                     request, 
                     f"Upload Failed! Missing required columns in file: {', '.join(missing_cols)}"
                 )
+                excel_batch.delete()
                 return redirect('/dashboard/')
 
             records_created = 0
@@ -501,7 +518,7 @@ def analytics_dashboard(request):
 
                     student_obj, created = Student.objects.get_or_create(
                         roll_number=roll,
-                        defaults={'name': name}
+                        defaults={'name': name, 'created_in_batch': excel_batch}
                     )
                     
                     if not created and student_obj.name != name:
@@ -555,6 +572,7 @@ def analytics_dashboard(request):
                             'internal_marks': internal,
                             'practical_marks': practical,
                             'assignment_marks': assignment,
+                            'excel_batch': excel_batch
                         }
                     )
 
@@ -573,20 +591,25 @@ def analytics_dashboard(request):
                                 'theory_total': th_tot or 0,
                                 'practical_attended': pr_att or 0,
                                 'practical_total': pr_tot or 0,
+                                'excel_batch': excel_batch
                             }
                         )
 
                     records_created += 1
 
-            ExcelBatch.objects.create(
-                filename=uploaded_file.name,
-                academic_year=request.POST.get('year', 'General')
-            )
+            excel_batch.record_count = records_created
+            excel_batch.save()
             messages.success(request, f"Success! Imported/Updated {records_created} student records.")
             return redirect('/dashboard/')
 
         except Exception as e:
             messages.error(request, f"Error processing file: {str(e)}")
+            # If batch exists, try to remove it to avoid orphan
+            try:
+                if 'excel_batch' in locals():
+                    excel_batch.delete()
+            except Exception:
+                pass
             return redirect('/dashboard/')
 
     selected_student_id = request.GET.get('student_id') or request.GET.get('dossier')
@@ -596,8 +619,8 @@ def analytics_dashboard(request):
 
     subjects = Subject.objects.all()
 
-    # Fetch upload batch history (replace `ExcelBatch.objects.all()` with your actual Model name if different, e.g., UploadHistory.objects.all())
-    uploaded_files_qs = ExcelBatch.objects.all() if 'ExcelBatch' in globals() else []
+    # Fetch upload batch history
+    uploaded_files_qs = ExcelBatch.objects.all()
 
     context = {
         'subjects': subjects,
@@ -688,9 +711,6 @@ def analytics_dashboard(request):
             # Fetch student achievements
             achievements = list(student.achievements.all())
 
-            # REQ 2: Full Achievement Depth Context for Dossier View
-            achievements = list(student.achievements.all())
-
             context.update({
                 'achievements': achievements,
                 'subject_performances': subject_performances,
@@ -761,11 +781,10 @@ def analytics_dashboard(request):
 
     master_student_roster = []
     
-    # 4-Quadrant Visual Scatter Analytics Collections
-    quadrant_top_right = []    # High Att (>=75%), High Acad (>=50%) -> Stars
-    quadrant_top_left = []     # Low Att (<75%), High Acad (>=50%)  -> Academic Potential
-    quadrant_bottom_right = []  # High Att (>=75%), Low Acad (<50%)   -> High Effort / Remedial
-    quadrant_bottom_left = []   # Low Att (<75%), Low Acad (<50%)   -> Critical Risk
+    quadrant_top_right = []    # High Att (>=75%), High Acad (>=50%)
+    quadrant_top_left = []     # Low Att (<75%), High Acad (>=50%)
+    quadrant_bottom_right = []  # High Att (>=75%), Low Acad (<50%)
+    quadrant_bottom_left = []   # Low Att (<75%), Low Acad (<50%)
 
     for st in all_students_list:
         st_m = student_marks_map.get(st.id, [])
@@ -860,7 +879,6 @@ def analytics_dashboard(request):
 # =========================================================
 # MULTI-SHEET EXCEL BULK INGESTION & DATA MANAGEMENT VIEWS
 # =========================================================
-
 @login_required
 def upload_excel_view(request):
     if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
@@ -869,6 +887,7 @@ def upload_excel_view(request):
 
     if request.method == 'POST' and request.FILES.get('excel_file'):
         excel_file = request.FILES['excel_file']
+        file_name = excel_file.name
 
         try:
             xls = pd.ExcelFile(excel_file)
@@ -879,6 +898,12 @@ def upload_excel_view(request):
                 return redirect('students:upload_excel')
 
             with transaction.atomic():
+                # Requirement 1: Create an ExcelBatch tracking record for upload history & deletion tracking
+                excel_batch = ExcelBatch.objects.create(
+                    filename=file_name,
+                    uploaded_by=request.user if request.user.is_authenticated else None
+                )
+
                 def get_num(row, col, default=0.0):
                     val = row.get(col)
                     return float(val) if pd.notna(val) else default
@@ -916,10 +941,13 @@ def upload_excel_view(request):
 
                     student_name = str(row.get('Student Name', '')).strip()
                     
-                    student, _ = Student.objects.get_or_create(
+                    student, created = Student.objects.get_or_create(
                         roll_number=roll,
-                        defaults={'name': student_name or roll}
+                        defaults={'name': student_name or roll, 'created_in_batch': excel_batch}
                     )
+                    if not created and student.name != student_name and student_name:
+                        student.name = student_name
+                        student.save()
 
                     subject = subject_lookup.get(subj_name)
                     if not subject:
@@ -948,6 +976,8 @@ def upload_excel_view(request):
                     marks_obj.assignment_marks = get_mark('Assignment')
                     marks_obj.presentation_marks = get_mark('Presentation')
                     
+                    # attach batch reference
+                    marks_obj.excel_batch = excel_batch
                     marks_obj.save()
 
                 student_lookup = {s.roll_number: s for s in Student.objects.all()}
@@ -964,7 +994,7 @@ def upload_excel_view(request):
                     if not student:
                         student, _ = Student.objects.get_or_create(
                             roll_number=roll,
-                            defaults={'name': str(row.get('Name', roll)).strip()}
+                            defaults={'name': str(row.get('Name', roll)).strip(), 'created_in_batch': excel_batch}
                         )
                         student_lookup[roll] = student
 
@@ -989,13 +1019,20 @@ def upload_excel_view(request):
                             'theory_total': th_tot,
                             'practical_attended': pr_att,
                             'practical_total': pr_tot,
+                            'excel_batch': excel_batch
                         }
                     )
 
-            messages.success(request, "Success! Multi-sheet academic dataset imported seamlessly.")
+            messages.success(request, f"Success! Excel batch '{file_name}' imported seamlessly.")
             return redirect('students:analytics_dashboard')
 
         except Exception as e:
+            # If upload fails, ensure to remove the partially created batch
+            try:
+                if 'excel_batch' in locals():
+                    excel_batch.delete()
+            except Exception:
+                pass
             messages.error(request, f"Import error: {str(e)}")
 
     return render(request, 'students/upload_excel.html')
@@ -1003,7 +1040,7 @@ def upload_excel_view(request):
 
 @login_required
 def upload_history(request):
-    """REQ 4: Upload History and Batch Summary tracking view."""
+    """REQ 1 & REQ 4: Upload History, Excel Batch Workbooks, and Year Summaries."""
     if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
@@ -1017,7 +1054,12 @@ def upload_history(request):
             'student_count': count
         })
 
-    return render(request, 'students/upload_history.html', {'year_summaries': year_summaries})
+    excel_batches = ExcelBatch.objects.all().order_by('-uploaded_at')
+
+    return render(request, 'students/upload_history.html', {
+        'year_summaries': year_summaries,
+        'excel_batches': excel_batches,
+    })
 
 
 @login_required
@@ -1048,7 +1090,12 @@ def delete_excel_batch(request, batch_id):
     if request.method == 'POST':
         batch = get_object_or_404(ExcelBatch, id=batch_id)
         filename = batch.filename
-        batch.delete()
-        messages.success(request, f"Excel workbook batch '{filename}' successfully deleted.")
+        
+        try:
+            batch.delete_associated_records()
+            messages.success(request, f"Excel workbook batch '{filename}' successfully deleted.")
+        except Exception as e:
+            messages.error(request, f"Failed to delete batch '{filename}': {str(e)}")
 
     return redirect('students:upload_history')
+
