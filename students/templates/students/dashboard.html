@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Academic Operating System & AI Command Center</title>
 
     <!-- Fonts & CSS -->
@@ -61,6 +61,16 @@
         .badge-risk-warning { background: rgba(245, 158, 11, 0.2); color: #FDE047; border: 1px solid rgba(245, 158, 11, 0.4); }
         .badge-risk-success { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.4); }
 
+        /* Small visual tweak to align select labels with smaller bottom margins */
+        .card-glass .form-label { margin-bottom: .25rem; }
+
+        /* Add helper so Reset Filters aligns same row as selects */
+        .filters-row .form-label { margin-bottom:.25rem; }
+        .filters-row .form-select { height: calc(2.25rem + 4px); } /* match button height visually */
+
+        /* Modal date visibility */
+        .modal .small.text-light { color: #e6eef8 !important; }
+
         @media print {
             @page {
                 size: A4 landscape !important;
@@ -79,11 +89,11 @@
             .no-print, .btn, nav, footer, #copyNoticeBtn, ::-webkit-scrollbar {
                 display: none !important;
             }
-            .card-glass, .ai-terminal { 
-                background: #ffffff !important; 
-                color: #000000 !important; 
-                border: 1px solid #999 !important; 
-                box-shadow: none !important; 
+            .card-glass, .ai-terminal {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 1px solid #999 !important;
+                box-shadow: none !important;
                 padding: 4px 8px !important;
                 margin-bottom: 6px !important;
             }
@@ -103,7 +113,7 @@
         <div class="d-flex align-items-center gap-2">
             <i class="fa-solid fa-user-shield text-primary fs-5"></i>
             <span class="fw-bold text-white fs-6">
-                Active Session: 
+                Active Session:
                 {% if request.user.is_authenticated %}
                     {{ user_display_name|default:request.user.username }}
                 {% else %}
@@ -149,7 +159,7 @@
                 <span class="input-group-text bg-dark text-secondary border-secondary">
                     <i class="fa-solid fa-magnifying-glass"></i>
                 </span>
-                <input type="text" name="search" class="form-control bg-dark text-white border-secondary" 
+                <input type="text" name="search" class="form-control bg-dark text-white border-secondary"
                        placeholder="Search Roll No or Name..." value="{{ search_query|default:'' }}">
             </div>
             <button type="submit" class="btn btn-primary fw-bold px-3">Inspect</button>
@@ -159,12 +169,10 @@
             <i class="fa-solid fa-gear"></i> Admin Panel
         </a>
 
-        <!-- CHANGED: Label to "History" (was "Batch History") -->
         <button class="btn btn-outline-info fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#batchHistoryModal">
             <i class="fa-solid fa-clock-rotate-left"></i> History
         </button>
 
-        <!-- Upload Button -->
         <button class="btn btn-success fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
             <i class="fa-solid fa-file-excel"></i> Upload Excel / CSV
         </button>
@@ -173,7 +181,8 @@
 
     <!-- SCOPE FILTER BAR -->
     <div class="card-glass p-3 mb-4 no-print">
-        <form method="GET" class="row g-3 align-items-center">
+        <!-- Changed: align-items-end and added filters-row helper class so Reset button aligns -->
+        <form method="GET" class="row g-3 align-items-end filters-row">
             <div class="col-md-5">
                 <label class="form-label text-muted small fw-bold mb-1">PROGRAM / CLASS SCOPE:</label>
                 <select name="year" class="form-select bg-dark text-white border-secondary" onchange="this.form.submit()">
@@ -196,8 +205,9 @@
                 </select>
             </div>
 
-            <div class="col-md-2 d-flex align-items-end">
-                <a href="/dashboard/" class="btn btn-outline-light w-100">Reset Filters</a>
+            <div class="col-md-2 d-flex align-items-end justify-content-end">
+                <!-- Use named URL so it remains correct in different setups -->
+                <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light w-100">Reset Filters</a>
             </div>
         </form>
     </div>
@@ -221,7 +231,7 @@
     <div class="alert alert-info border-0 bg-primary text-white p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
         <div>
             <h4 class="fw-bold mb-0">
-                <i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier: 
+                <i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier:
                 {% if student.name %}
                     {{ student.name }}
                 {% elif student.user %}
@@ -236,7 +246,7 @@
             <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold shadow-sm">
                 <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export Report PDF
             </button>
-            <a href="/dashboard/" class="btn btn-outline-light btn-sm fw-bold">← Back to Overview</a>
+            <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light btn-sm fw-bold">← Back to Overview</a>
         </div>
     </div>
 
@@ -274,40 +284,36 @@
             </div>
         </div>
     </div>
-<!-- REQUIREMENT 2: Full Achievement Depth Rendering -->
+<!-- REQUIREMENT 2: Full Achievement Depth Rendering - only show when achievements exist -->
+{% if achievements and achievements|length > 0 %}
 <div class="card-glass p-4 mb-4 border-warning">
     <h5 class="fw-bold text-warning mb-3"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
     <div class="row g-3">
-        {% if achievements or student.achievements.all %}
-            {% for item in achievements|default:student.achievements.all %}
-                <div class="col-md-6 col-lg-4">
-                    <div class="p-3 bg-dark rounded border border-warning h-100 d-flex flex-column justify-content-between">
-                        <div>
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <span class="badge bg-warning text-dark fw-bold">
-                                    <i class="fa-solid fa-star me-1"></i>{{ item.category|default:"Honor / Award" }}
-                                </span>
-                                {% if item.date_achieved %}
-                                    <small class="text-warning opacity-75 fw-semibold">
-                                        <i class="fa-solid fa-calendar-alt me-1"></i>{{ item.date_achieved|date:"M d, Y" }}
-                                    </small>
-                                {% endif %}
-                            </div>
-                            <h6 class="fw-bold text-white mb-2">{{ item.title|default:item }}</h6>
-                            {% if item.description %}
-                                <p class="text-light opacity-75 small mb-0">{{ item.description }}</p>
+        {% for item in achievements %}
+            <div class="col-md-6 col-lg-4">
+                <div class="p-3 bg-dark rounded border border-warning h-100 d-flex flex-column justify-content-between">
+                    <div>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <span class="badge bg-warning text-dark fw-bold">
+                                <i class="fa-solid fa-star me-1"></i>{{ item.category|default:"Honor / Award" }}
+                            </span>
+                            {% if item.date_achieved %}
+                                <small class="text-warning opacity-75 fw-semibold">
+                                    <i class="fa-solid fa-calendar-alt me-1"></i>{{ item.date_achieved|date:"M d, Y" }}
+                                </small>
                             {% endif %}
                         </div>
+                        <h6 class="fw-bold text-white mb-2">{{ item.title|default:item }}</h6>
+                        {% if item.description %}
+                            <p class="text-light opacity-75 small mb-0">{{ item.description }}</p>
+                        {% endif %}
                     </div>
                 </div>
-            {% endfor %}
-        {% else %}
-            <div class="col-12">
-                <span class="text-muted small">No achievements, extra-curricular honors, or awards currently recorded for this student.</span>
             </div>
-        {% endif %}
+        {% endfor %}
     </div>
 </div>
+{% endif %}
 
     <div class="card-glass p-4 mb-4 border-warning">
         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -503,13 +509,13 @@
                 <i class="fa-solid fa-calendar-check me-2 text-info"></i>Subject-Wise Attendance Breakdown
             </h5>
             <div class="fs-6 text-white">
-                Overall Attendance: 
+                Overall Attendance:
                 <span class="badge {% if overall_att < 75 %}badge-risk-danger{% else %}badge-risk-success{% endif %} fs-6 ms-1">
                     {{ overall_att|default:0 }}%
                 </span>
             </div>
         </div>
-        
+
         <div class="table-responsive">
             <table class="table table-dark-custom align-middle text-center mb-0">
                 <thead>
@@ -606,7 +612,7 @@
         </div>
     </div>
 
-    <div class="row g-4 mb-4">
+    <div class="row g-4 mb-4"> <!-- charts (kept) --> 
         <div class="col-lg-6">
             <div class="card-glass p-4 h-100">
                 <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Subject Performance Comparison</h5>
@@ -712,42 +718,97 @@
         </div>
     </div>
 
+    <!-- Roster updated: includes Roll vs Rank toggle and full columns (Total Marks / Percentage / Grade / Pass-Fail) -->
     <div class="card-glass p-4 mb-4">
-        <h5 class="fw-bold text-white mb-1"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
+
+            <!-- Toggle: Roll vs Rank (preserve filters/search) -->
+            <div class="btn-group btn-group-sm no-print" role="group" aria-label="Sort Mode">
+                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll" class="btn {% if sort_mode == 'roll' or not sort_mode %}btn-primary{% else %}btn-outline-light{% endif %}">Roll Number Order</a>
+                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=rank" class="btn {% if sort_mode == 'rank' %}btn-primary{% else %}btn-outline-light{% endif %}">Ranking Order</a>
+            </div>
+        </div>
+
         <small class="text-muted d-block mb-3">💡 Click on any student row to inspect their full 360° Parent Dossier</small>
         <div class="table-responsive">
             <table class="table table-dark-custom">
                 <thead>
                     <tr class="text-muted">
-                        <th>Roll No</th><th>Name</th><th>Class</th><th>Overall Marks %</th><th>Attendance %</th><th>AI Risk Status</th><th>Action</th>
+                        {% if sort_mode == 'rank' %}<th style="width:6%">Rank</th>{% endif %}
+                        <th style="width:12%">Roll No</th>
+                        <th style="width:22%">Name</th>
+                        <th style="width:16%">Total Marks</th>
+                        <th style="width:8%">Percentage</th>
+                        <th style="width:8%">Grade</th>
+                        <th style="width:8%">Result</th>
+                        <th style="width:8%">Attendance</th>
+                        <th style="width:10%">AI Risk</th>
+                        <th style="width:8%">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in master_student_roster %}
                     <tr class="clickable-row" onclick="window.location='?student_id={{ item.student.id }}'">
-                        <td><strong>{{ item.student.roll_number }}</strong></td>
+                        {% if sort_mode == 'rank' %}<td>{{ item.rank }}</td>{% endif %}
+                        <td><strong>{{ item.roll_number }}</strong></td>
                         <td>
-                            {% if item.student.name %}
-                                {{ item.student.name }}
-                            {% elif item.student.user %}
+                            {% if item.name %}
+                                {{ item.name }}
+                            {% elif item.student and item.student.user %}
                                 {{ item.student.user.get_full_name|default:item.student.user.username }}
                             {% else %}
                                 Student #{{ item.student.id }}
                             {% endif %}
                         </td>
-                        <td><span class="badge bg-secondary">{{ item.student.get_year_display }}</span></td>
-                        <td><strong>{{ item.avg_marks|default:0 }}%</strong></td>
-                        <td>{{ item.attendance|default:0 }}%</td>
-                        <td><span class="badge badge-risk-{{ item.badge|default:'success' }} px-2 py-1">{{ item.level|default:'STABLE' }} ({{ item.risk|default:0 }}%)</span></td>
+                        <td>
+                            {% if item.total_marks is not None and item.total_max is not None %}
+                                {{ item.total_marks }} / {{ item.total_max }}
+                            {% elif item.total_marks is not None %}
+                                {{ item.total_marks }}
+                            {% else %}
+                                {% if item.avg_marks is not None %}
+                                    {{ item.avg_marks }} (avg)
+                                {% else %}
+                                    -
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td><strong>
+                            {% if item.percentage is not None %}{{ item.percentage }}%{% elif item.avg_marks is not None %}{{ item.avg_marks }}%{% else %}-{% endif %}
+                        </strong></td>
+                        <td>
+                            {% if item.grade %}{{ item.grade }}{% else %}
+                                {% comment %} Try to infer grade if grade not present {% endcomment %}
+                                {% if item.percentage is not None %}
+                                    {% if item.percentage >= 90 %}A+{% elif item.percentage >= 80 %}A{% elif item.percentage >= 70 %}B+{% elif item.percentage >= 60 %}B{% elif item.percentage >= 50 %}C{% elif item.percentage >= 40 %}D{% else %}F{% endif %}
+                                {% else %}-{% endif %}
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if item.status %}
+                                {% if item.status == 'PASS' %}<span class="badge bg-success">PASS</span>{% else %}<span class="badge bg-danger">FAIL</span>{% endif %}
+                            {% else %}
+                                {% if item.percentage is not None and item.percentage >= 40 %}<span class="badge bg-success">PASS</span>{% else %}<span class="badge bg-danger">FAIL</span>{% endif %}
+                            {% endif %}
+                        </td>
+                        <td>{{ item.attendance|default:'-' }}%</td>
+                        <td>
+                            <span class="badge {% if item.badge == 'danger' or item.level == 'CRITICAL' %}bg-danger{% elif item.badge == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
+                                {{ item.level|default:'STABLE' }} ({{ item.risk|default:0 }}%)
+                            </span>
+                        </td>
                         <td><button class="btn btn-sm btn-outline-primary py-0"><i class="fa-solid fa-magnifying-glass me-1"></i>Inspect</button></td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="7" class="text-center text-muted py-4">No student records found. Upload an Excel sheet to populate data.</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted py-4">No student records found. Upload an Excel sheet to populate data.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+
+    {% endif %}
 
     <script>
         document.addEventListener("DOMContentLoaded", function() {
@@ -845,19 +906,19 @@
                             }
                         },
                         scales: {
-                            x: { 
-                                title: { display: true, text: 'Attendance %', color: '#9CA3AF' }, 
-                                min: 0, 
-                                max: 100, 
-                                grid: { color: 'rgba(255,255,255,0.05)' }, 
-                                ticks: { color: '#9CA3AF' } 
+                            x: {
+                                title: { display: true, text: 'Attendance %', color: '#9CA3AF' },
+                                min: 0,
+                                max: 100,
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9CA3AF' }
                             },
-                            y: { 
-                                title: { display: true, text: 'Marks %', color: '#9CA3AF' }, 
-                                min: 0, 
-                                max: 100, 
-                                grid: { color: 'rgba(255,255,255,0.05)' }, 
-                                ticks: { color: '#9CA3AF' } 
+                            y: {
+                                title: { display: true, text: 'Marks %', color: '#9CA3AF' },
+                                min: 0,
+                                max: 100,
+                                grid: { color: 'rgba(255,255,255,0.05)' },
+                                ticks: { color: '#9CA3AF' }
                             }
                         }
                     }
@@ -865,11 +926,10 @@
             }
         });
     </script>
-    {% endif %}
 
 </div>
 
-<!-- REQUIREMENT 4: Simplified History Modal (File Name + Delete) -->
+<!-- REQUIREMENT 4: Excel History & Batch Deletion Modal (updated: shows date-only "Uploaded On") -->
 <div class="modal fade" id="batchHistoryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark text-white border-secondary">
@@ -883,14 +943,20 @@
                         <thead>
                             <tr class="text-white small">
                                 <th>File Name</th>
+                                <th>Uploaded On</th>
                                 <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for batch in excel_batches|default:None %}
                             <tr>
-                                <td class="fw-semibold text-white">
-                                    <i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}
+                                <td class="fw-semibold text-white"><i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}</td>
+                                <td class="small text-light">
+                                    {% if batch.uploaded_at %}
+                                        {{ batch.uploaded_at|date:"Y-m-d" }}
+                                    {% else %}
+                                        -
+                                    {% endif %}
                                 </td>
                                 <td class="text-end">
                                     <form method="POST" action="{% url 'students:delete_excel_batch' batch.id %}" onsubmit="return confirm('Deleting this upload batch will clean up the associated academic records. Are you sure?');" class="d-inline">
@@ -903,7 +969,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="2" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
+                                <td colspan="3" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -917,7 +983,7 @@
     </div>
 </div>
 
-<!-- MODAL: BULK 3-SHEET EXCEL UPLOAD -->
+<!-- MODAL: BULK 3-SHEET EXCEL UPLOAD (unchanged) -->
 <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content bg-dark text-white border-secondary">
@@ -950,36 +1016,182 @@
 </div>
 
 <script>
-    function exportDossierPDF() {
-        const btn = document.getElementById('exportPdfBtn');
-        const originalText = btn ? btn.innerHTML : '';
-        if (btn) {
-            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Generating PDF...';
-            btn.disabled = true;
+/*
+  Best export flow (Option A):
+  - Clone dossier content, expand scrollable regions
+  - Convert canvases (Chart.js) to images to ensure charts appear in PDF
+  - Use html2pdf to generate A4 PDF; fallback to printing
+  - Clean up clone and restore UI (cursor + button) so page isn't stuck
+*/
+ async function exportDossierPDF() {
+    const btn = document.getElementById('exportPdfBtn');
+    const originalText = btn ? btn.innerHTML : '';
+    try {
+        if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Preparing PDF...'; btn.disabled = true; }
+        // Give browser a moment to update the UI
+        await new Promise(r => setTimeout(r, 80));
+        document.body.style.cursor = 'wait';
+
+        const source = document.getElementById('dossierContent');
+        if (!source) throw new Error('Dossier content element not found');
+
+        // Clone and sanitize for print
+        const clone = source.cloneNode(true);
+
+        // Remove interactive / no-print elements
+        clone.querySelectorAll('.no-print, .modal, .btn, button, [data-bs-toggle], .modal-backdrop, .alert, form, input, select, textarea').forEach(n => {
+            try { n.parentNode && n.parentNode.removeChild(n); } catch (e) {}
+        });
+
+        // Convert Chart.js canvases to images to ensure charts appear in print
+        const canvases = Array.from(clone.querySelectorAll('canvas'));
+        for (const c of canvases) {
+            try {
+                const dataUrl = c.toDataURL('image/png');
+                const img = document.createElement('img');
+                img.src = dataUrl;
+                img.style.maxWidth = '100%';
+                img.style.height = 'auto';
+                if (c.width) img.style.width = Math.min(c.width, 900) + 'px';
+                c.parentNode.replaceChild(img, c);
+            } catch (err) {
+                console.warn('Canvas->img conversion error (continuing):', err);
+            }
         }
 
-        const element = document.getElementById('dossierContent');
-        const opt = {
-            margin:       0.3,
-            filename:     'Student_Academic_Report.pdf',
-            image:        { type: 'jpeg', quality: 0.98 },
-            html2canvas:  { scale: 2, useCORS: true },
-            jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
-        };
+        // Capture important stylesheet links (bootstrap, fontawesome, google fonts) to preserve look
+        const headLinks = `
+            <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        `;
 
-        html2pdf().set(opt).from(element).save().then(() => {
-            if (btn) {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
+        // Professional print CSS - keeps colors and readability
+        const printCss = `
+            @page { size: A4 portrait; margin: 12mm 10mm; }
+            html, body { background: #ffffff !important; color: #222 !important; -webkit-print-color-adjust: exact; }
+            body { font-family: 'Plus Jakarta Sans', Arial, Helvetica, sans-serif; font-size: 11px; margin: 0; padding: 0; }
+            .print-wrapper { box-sizing: border-box; width: 100%; padding: 8mm; color: #111; }
+            .print-header { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+            .print-header .logo { font-size:22px; color:#0b0f19; }
+            .print-header .title { font-weight:700; font-size:16px; color:#0b1220; }
+            .print-header .meta { margin-left:auto; font-size:10px; color:#444; text-align:right; }
+
+            /* Card styling adjusted for print */
+            .card-glass, .ai-terminal {
+                background: #fff !important;
+                border: 1px solid #e6e9ee !important;
+                box-shadow: none !important;
+                border-radius: 8px !important;
+                padding: 10px !important;
+                margin-bottom: 10px !important;
             }
-        }).catch(() => {
-            if (btn) {
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }
+            h5 { color: #0b1220 !important; }
+
+            /* Table styling for readability */
+            table { border-collapse: collapse; width: 100%; margin-bottom: 6px; }
+            table th, table td { border: 1px solid #e3e6ea !important; padding: 6px 8px !important; color: #111 !important; font-size: 10pt; }
+            table th { background: #f7f8fa !important; font-weight:600; }
+            .table-dark-custom { color: #111 !important; }
+
+            /* Notice box */
+            .notice-box { background: #0b1220; color: #fff; padding: 12px; border-radius: 6px; }
+            .notice-box p { margin:0; font-size:10.5pt; color: #f3f7fb; }
+
+            /* Footer fixed with page number (page counter often supported by Chromium) */
+            .print-footer { position: fixed; bottom: 8mm; left: 0; right: 0; text-align: center; font-size: 10px; color: #666; }
+            .print-footer .page:after { content: "Page " counter(page); }
+
+            /* Ensure charts/images scale */
+            img { max-width: 100%; height: auto; display:block; }
+
+            /* Prevent breaking inside important blocks */
+            .card-glass, .ai-terminal, .table-responsive, table, .print-section { page-break-inside: avoid; break-inside: avoid; }
+
+            /* Hide anything remaining interactive */
+            .no-print, .btn, button, nav, footer, input, select, textarea { display:none !important; }
+        `;
+
+        // Build header HTML
+        const headerHtml = `
+            <div class="print-header">
+                <div class="logo"><i class="fa-solid fa-graduation-cap"></i></div>
+                <div>
+                    <div class="title">Department Executive Command Hub</div>
+                    <div style="font-size:11px; color:#555;">Centralized Academic Operating System for Faculty</div>
+                </div>
+                <div class="meta">${new Date().toLocaleString()}</div>
+            </div>
+        `;
+
+        // Open new print window
+        const w = window.open('', '_blank');
+        if (!w) {
+            // popup blocked; fallback: print current window (non-blocking)
+            window.print();
+            return;
+        }
+
+        // Compose and write the print document
+        w.document.open();
+        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`);
+        w.document.write(headLinks);
+        w.document.write(`<style>${printCss}</style>`);
+        w.document.write('</head><body>');
+        w.document.write('<div class="print-wrapper">');
+        w.document.write(headerHtml);
+        w.document.write('<div class="print-content">');
+        w.document.write(clone.innerHTML);
+        w.document.write('</div>'); // print-content
+        w.document.write('</div>'); // print-wrapper
+        w.document.write('<div class="print-footer"><span class="page"></span></div>');
+        w.document.write('</body></html>');
+        w.document.close();
+
+        // Wait for images to load in new window
+        const waitImgs = new Promise(resolve => {
+            try {
+                const imgs = w.document.images;
+                if (!imgs || imgs.length === 0) return resolve();
+                let loaded = 0;
+                for (let i = 0; i < imgs.length; i++) {
+                    if (imgs[i].complete) loaded++;
+                    else {
+                        imgs[i].onload = imgs[i].onerror = () => {
+                            loaded++;
+                            if (loaded >= imgs.length) resolve();
+                        };
+                    }
+                }
+                // safety timeout
+                setTimeout(() => resolve(), 2000);
+            } catch (e) { resolve(); }
         });
+
+        await waitImgs;
+
+        // Allow layout, then print
+        setTimeout(() => {
+            try {
+                w.focus();
+                w.print();
+                // try to close after short delay
+                setTimeout(() => { try { w.close(); } catch (e) {} }, 800);
+            } catch (err) {
+                console.warn('Print invocation failed:', err);
+            }
+        }, 350);
+
+    } catch (err) {
+        console.error('Export PDF error:', err);
+        try { window.print(); } catch (e) { console.warn('Fallback print failed', e); }
+    } finally {
+        if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
+        document.body.style.cursor = 'default';
     }
+}
 </script>
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

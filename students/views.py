@@ -1,7 +1,6 @@
 # students/views.py
 import re
 import pandas as pd
-
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
@@ -12,14 +11,15 @@ from django.db import transaction
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+
 from .models import ExcelBatch
 from .models import (
     Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement
 )
 from .utils import (
-    map_dataframe_columns, 
-    parse_year_from_roll, 
-    analyze_student_performance, 
+    map_dataframe_columns,
+    parse_year_from_roll,
+    analyze_student_performance,
     generate_ai_parent_notice
 )
 
@@ -30,10 +30,9 @@ from .utils import (
 
 def get_user_display_name(user):
     """Priority resolution: Student Name -> AllowedTeacher Name -> User Full Name -> Clean Username."""
-    if hasattr(user, 'profile') and user.profile.student and user.profile.student.name:
+    if hasattr(user, 'profile') and getattr(user.profile, 'student', None) and user.profile.student.name:
         return user.profile.student.name
 
-    # Fetch complete name directly from AllowedTeacher without splitting
     teacher_entry = AllowedTeacher.objects.filter(email__iexact=user.email).first()
     if teacher_entry and teacher_entry.name:
         return teacher_entry.name.strip()
@@ -58,14 +57,14 @@ def calculate_overall_attendance(student, semester=None):
     qs = SubjectAttendance.objects.filter(student=student)
     if semester:
         qs = qs.filter(semester=semester)
-    
+
     totals = qs.aggregate(
         th_att=Sum('theory_attended'),
         th_tot=Sum('theory_total'),
         pr_att=Sum('practical_attended'),
         pr_tot=Sum('practical_total')
     )
-    
+
     grand_attended = (totals['th_att'] or 0) + (totals['pr_att'] or 0)
     grand_total = (totals['th_tot'] or 0) + (totals['pr_tot'] or 0)
 
@@ -104,7 +103,7 @@ def custom_login(request):
 
         # Standard login lookup
         user = authenticate(request, username=identifier, password=password_input)
-        
+
         if user is None and '@' in identifier:
             user_obj = User.objects.filter(email__iexact=identifier).first()
             if not user_obj:
@@ -148,7 +147,7 @@ def custom_login(request):
             student_user_exists = User.objects.filter(
                 Q(username__iexact=student_obj.roll_number.lower()) | Q(email__iexact=identifier)
             ).exists()
-            
+
             if not student_user_exists:
                 request.session['setup_email'] = identifier if '@' in identifier else f"{student_obj.roll_number.lower()}@college.edu"
                 request.session['setup_roll'] = student_obj.roll_number.lower()
@@ -237,7 +236,7 @@ def first_time_setup(request):
         request.session.pop('setup_email', None)
         request.session.pop('setup_role', None)
         request.session.pop('setup_roll', None)
-        
+
         if user:
             login(request, user)
             if role == 'STUDENT':
@@ -260,7 +259,7 @@ def password_reset_request(request):
     """Finds the user by username or email and stores their ID in the session for direct reset."""
     if request.method == "POST":
         input_value = request.POST.get('username_or_email', '').strip()
-        
+
         user = User.objects.filter(
             Q(username__iexact=input_value) | Q(email__iexact=input_value)
         ).first()
@@ -271,7 +270,7 @@ def password_reset_request(request):
             return redirect('students:password_reset_confirm')
         else:
             messages.error(request, "No account found with that Roll Number or Email.")
-            
+
     return render(request, 'students/password_reset_request.html')
 
 def password_reset_confirm(request):
@@ -296,7 +295,7 @@ def password_reset_confirm(request):
 
         user.set_password(password)
         user.save()
-        
+
         request.session.pop('reset_user_id', None)
         messages.success(request, "Password updated successfully! You can now log in.")
         return redirect('students:login')
@@ -319,7 +318,7 @@ def student_dashboard(request):
 
     user_identifier = request.user.username.split('@')[0]
     student = Student.objects.filter(
-        Q(roll_number__iexact=request.user.username) | 
+        Q(roll_number__iexact=request.user.username) |
         Q(roll_number__iexact=user_identifier)
     ).first()
 
@@ -447,7 +446,7 @@ def analytics_dashboard(request):
                 df = pd.read_excel(uploaded_file)
 
             df.columns = df.columns.str.strip()
-            
+
             streamlined_cols = {'Roll Number', 'Subject', 'Total Theory', 'Attended Theory', 'Total Practical', 'Attended Practical'}
             if streamlined_cols.issubset(set(df.columns)):
                 records_created = 0
@@ -456,15 +455,12 @@ def analytics_dashboard(request):
                         roll = str(row['Roll Number']).strip()
                         if not roll or roll.lower() == 'nan':
                             continue
-                        
+
                         student_obj, created = Student.objects.get_or_create(
                             roll_number=roll,
                             defaults={'name': f"Student {roll}", 'created_in_batch': excel_batch}
                         )
-                        if created:
-                            # already set created_in_batch via defaults
-                            pass
-                        
+
                         subj_name = str(row['Subject']).strip()
                         subject_obj, _ = Subject.objects.get_or_create(name=subj_name)
 
@@ -490,7 +486,7 @@ def analytics_dashboard(request):
             df, missing_cols = map_dataframe_columns(df)
             if missing_cols:
                 messages.error(
-                    request, 
+                    request,
                     f"Upload Failed! Missing required columns in file: {', '.join(missing_cols)}"
                 )
                 excel_batch.delete()
@@ -520,7 +516,7 @@ def analytics_dashboard(request):
                         roll_number=roll,
                         defaults={'name': name, 'created_in_batch': excel_batch}
                     )
-                    
+
                     if not created and student_obj.name != name:
                         student_obj.name = name
                         student_obj.save()
@@ -695,7 +691,7 @@ def analytics_dashboard(request):
             primary_ai = sorted_subs[-1]['ai'] if sorted_subs else {}
 
             parent_notice_draft = generate_ai_parent_notice(
-                student.name, student.roll_number, weakest_subject, 
+                student.name, student.roll_number, weakest_subject,
                 overall_academic_avg, overall_att, primary_ai.get('risk_level', 'STABLE')
             )
 
@@ -770,7 +766,7 @@ def analytics_dashboard(request):
     overall_avg = round(sum(m.percentage for m in all_marks_qs) / eval_count, 1) if eval_count else 0
 
     all_students_list = Student.objects.filter(year=selected_year) if selected_year else Student.objects.all()
-    
+
     att_scores = [calculate_overall_attendance(st) for st in all_students_list]
     att_avg = round(sum(att_scores) / len(att_scores), 1) if att_scores else 0.0
     att_map = {st.id: calculate_overall_attendance(st) for st in all_students_list}
@@ -780,7 +776,7 @@ def analytics_dashboard(request):
         student_marks_map.setdefault(mark.student_id, []).append(mark)
 
     master_student_roster = []
-    
+
     quadrant_top_right = []    # High Att (>=75%), High Acad (>=50%)
     quadrant_top_left = []     # Low Att (<75%), High Acad (>=50%)
     quadrant_bottom_right = []  # High Att (>=75%), Low Acad (<50%)
@@ -790,7 +786,7 @@ def analytics_dashboard(request):
         st_m = student_marks_map.get(st.id, [])
         att_val = att_map.get(st.id, 0.0)
         st_avg = round(sum(m.percentage for m in st_m) / len(st_m), 1) if st_m else getattr(st, 'academic_avg', 0.0)
-        
+
         first_m = st_m[0] if st_m else None
         ai_data = analyze_student_performance(first_m, att_val) if first_m else {
             'fail_prob': 0, 'risk_level': 'STABLE', 'badge_class': 'success', 'remedial_plan': 'Maintain current study routine.'
@@ -802,9 +798,9 @@ def analytics_dashboard(request):
         quadrant = "Stars" if (att_val >= 75 and st_avg >= 50) else "Potential" if (att_val < 75 and st_avg >= 50) else "High Effort" if (att_val >= 75 and st_avg < 50) else "Critical"
 
         st_point = {
-            'x': att_val, 
-            'y': st_avg, 
-            'name': st.name, 
+            'x': att_val,
+            'y': st_avg,
+            'name': st.name,
             'roll': st.roll_number,
             'color': color,
             'quadrant': quadrant
@@ -832,13 +828,114 @@ def analytics_dashboard(request):
             'remedial': ai_data['remedial_plan']
         })
 
-    department_toppers = sorted(master_student_roster, key=lambda x: x['avg_marks'], reverse=True)[:5]
-    bottom_remedial_roster = sorted(master_student_roster, key=lambda x: x['risk'], reverse=True)[:5]
+    # --- START PATCH: compute totals, percentages, grades, and sort/ranking support ---
+    # Determine requested sort mode from URL (default 'roll')
+    sort_mode = request.GET.get('sort', 'roll')
+
+    # Enrich each master_student_roster item with totals and percentage if possible
+    for item in master_student_roster:
+        st = item.get('student')
+        st_marks = student_marks_map.get(st.id, []) if st else []
+        total_marks = 0.0
+        total_max = 0.0
+
+        for m in st_marks:
+            # Sum available components for the mark record
+            components = [
+                'unit_1_marks', 'unit_2_marks', 'unit_3_marks', 'unit_4_marks',
+                'internal_marks', 'practical_marks', 'assignment_marks', 'presentation_marks'
+            ]
+            m_total = 0.0
+            for comp in components:
+                val = getattr(m, comp, None)
+                if val is not None:
+                    try:
+                        m_total += float(val)
+                    except Exception:
+                        pass
+            total_marks += m_total
+
+            # Resolve subject-level max for this mark's subject
+            subj = getattr(m, 'subject', None)
+            subj_max = 0.0
+            if subj:
+                subj_max = float(getattr(subj, 'total_max_marks', 0) or 0)
+                if not subj_max:
+                    subj_max += float(getattr(subj, 'unit_1_max', 0) or getattr(subj, 'max_unit_1', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_2_max', 0) or getattr(subj, 'max_unit_2', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_3_max', 0) or getattr(subj, 'max_unit_3', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_4_max', 0) or getattr(subj, 'max_unit_4', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_internal_marks', 0) or getattr(subj, 'max_int', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_practical_marks', 0) or getattr(subj, 'max_pract', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_assignment_marks', 0) or getattr(subj, 'max_ass', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_presentation_marks', 0) or 0)
+            total_max += subj_max
+
+        # Final percentage (fallback to avg_marks if we have nothing)
+        percentage = None
+        if total_max and total_max > 0:
+            percentage = round((total_marks / total_max) * 100, 1)
+        else:
+            percentage = round(item.get('avg_marks', 0), 1) if item.get('avg_marks') is not None else None
+
+        # Grade inference (if grade is missing)
+        grade = item.get('grade') if item.get('grade') else None
+        if not grade and percentage is not None:
+            if percentage >= 90:
+                grade = 'A+'
+            elif percentage >= 80:
+                grade = 'A'
+            elif percentage >= 70:
+                grade = 'B+'
+            elif percentage >= 60:
+                grade = 'B'
+            elif percentage >= 50:
+                grade = 'C'
+            elif percentage >= 40:
+                grade = 'D'
+            else:
+                grade = 'F'
+
+        # Status inference (PASS threshold 40%)
+        status = item.get('status') or ('PASS' if (percentage is not None and percentage >= 40) else 'FAIL')
+
+        # Persist values on the roster item so template can use them
+        item['total_marks'] = int(total_marks) if total_marks is not None else None
+        item['total_max'] = int(total_max) if total_max is not None and total_max > 0 else None
+        item['percentage'] = percentage
+        item['grade'] = grade
+        item['status'] = status
+
+    # Sorting / Ranking behavior
+    if sort_mode == 'rank':
+        # Sort by computed percentage (desc). If percentage missing, fall back to avg_marks.
+        master_student_roster.sort(key=lambda x: (x.get('percentage') is None, -(x.get('percentage') or x.get('avg_marks', 0))))
+        # assign ranks (1-based). Use percentage if present, else avg_marks
+        current_rank = 0
+        prev_score = None
+        for idx, it in enumerate(master_student_roster, start=1):
+            score = it.get('percentage') if it.get('percentage') is not None else it.get('avg_marks', 0)
+            if prev_score is None or score != prev_score:
+                current_rank = idx
+                prev_score = score
+            it['rank'] = current_rank
+    else:
+        # Default roll order — sort by roll_number string so listing is stable
+        try:
+            master_student_roster.sort(key=lambda x: (str(x.get('roll_number') or '').lower()))
+        except Exception:
+            pass
+        for it in master_student_roster:
+            it.pop('rank', None)
+
+    # Recompute department toppers and bottom remedial roster using the enriched percentage/risk
+    department_toppers = sorted(master_student_roster, key=lambda x: (x.get('percentage') is None, -(x.get('percentage') or x.get('avg_marks', 0))))[:5]
+    bottom_remedial_roster = sorted(master_student_roster, key=lambda x: (-(x.get('risk', 0) or 0)))[:5]
 
     scatter_data = [
         {
-            'x': item['attendance'], 
-            'y': item['avg_marks'], 
+            'x': item['attendance'],
+            'y': item['avg_marks'],
             'name': item['student'].name,
             'color': "#28a745" if (item['attendance'] >= 75 and item['avg_marks'] >= 50) else "#ffc107" if (item['attendance'] < 75 and item['avg_marks'] >= 50) else "#fd7e14" if (item['attendance'] >= 75 and item['avg_marks'] < 50) else "#dc3545"
         } for item in master_student_roster
@@ -871,6 +968,7 @@ def analytics_dashboard(request):
             f"Academic Score: {overall_avg}% | Attendance: {att_avg}%. "
             f"Unit Mastery Averages: U1 ({unit_mastery[0]}%), U2 ({unit_mastery[1]}%), U3 ({unit_mastery[2]}%), U4 ({unit_mastery[3]}%)."
         ),
+        'sort_mode': sort_mode,
     })
 
     return render(request, 'students/dashboard.html', context)
@@ -878,7 +976,9 @@ def analytics_dashboard(request):
 
 # =========================================================
 # MULTI-SHEET EXCEL BULK INGESTION & DATA MANAGEMENT VIEWS
+# (upload_excel_view, upload_history, delete_year_data, delete_excel_batch remain unchanged)
 # =========================================================
+
 @login_required
 def upload_excel_view(request):
     if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
@@ -898,7 +998,6 @@ def upload_excel_view(request):
                 return redirect('students:upload_excel')
 
             with transaction.atomic():
-                # Requirement 1: Create an ExcelBatch tracking record for upload history & deletion tracking
                 excel_batch = ExcelBatch.objects.create(
                     filename=file_name,
                     uploaded_by=request.user if request.user.is_authenticated else None
@@ -940,7 +1039,7 @@ def upload_excel_view(request):
                         continue
 
                     student_name = str(row.get('Student Name', '')).strip()
-                    
+
                     student, created = Student.objects.get_or_create(
                         roll_number=roll,
                         defaults={'name': student_name or roll, 'created_in_batch': excel_batch}
@@ -975,8 +1074,7 @@ def upload_excel_view(request):
                     marks_obj.internal_marks = get_mark('Internal')
                     marks_obj.assignment_marks = get_mark('Assignment')
                     marks_obj.presentation_marks = get_mark('Presentation')
-                    
-                    # attach batch reference
+
                     marks_obj.excel_batch = excel_batch
                     marks_obj.save()
 
@@ -1027,7 +1125,6 @@ def upload_excel_view(request):
             return redirect('students:analytics_dashboard')
 
         except Exception as e:
-            # If upload fails, ensure to remove the partially created batch
             try:
                 if 'excel_batch' in locals():
                     excel_batch.delete()
@@ -1090,7 +1187,7 @@ def delete_excel_batch(request, batch_id):
     if request.method == 'POST':
         batch = get_object_or_404(ExcelBatch, id=batch_id)
         filename = batch.filename
-        
+
         try:
             batch.delete_associated_records()
             messages.success(request, f"Excel workbook batch '{filename}' successfully deleted.")
