@@ -20,7 +20,10 @@
             --bg-card: #111827;
             --border-glow: rgba(255, 255, 255, 0.08);
             --accent-blue: #3B82F6;
+            --accent-blue-2: #0b74ff;
             --text-main: #F9FAFB;
+            --muted-contrast: #9CA3AF; /* readable muted on dark */
+            --card-text: #E6EEF8;
         }
 
         body {
@@ -52,24 +55,84 @@
             border-bottom: 1px solid rgba(255, 255, 255, 0.04);
             padding: 0.9rem 0.75rem;
             vertical-align: middle;
+            color: var(--card-text);
         }
 
         .clickable-row { cursor: pointer; transition: background-color 0.2s; }
-        .clickable-row:hover { background-color: rgba(59, 130, 246, 0.15) !important; }
+        .clickable-row:hover { background-color: rgba(59, 130, 246, 0.12) !important; }
 
         .badge-risk-danger  { background: rgba(239, 68, 68, 0.2); color: #FCA5A5; border: 1px solid rgba(239, 68, 68, 0.4); }
         .badge-risk-warning { background: rgba(245, 158, 11, 0.2); color: #FDE047; border: 1px solid rgba(245, 158, 11, 0.4); }
         .badge-risk-success { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.4); }
 
         /* Small visual tweak to align select labels with smaller bottom margins */
-        .card-glass .form-label { margin-bottom: .25rem; }
+        .card-glass .form-label { margin-bottom: .25rem; color: var(--muted-contrast); }
 
         /* Add helper so Reset Filters aligns same row as selects */
         .filters-row .form-label { margin-bottom:.25rem; }
-        .filters-row .form-select { height: calc(2.25rem + 4px); } /* match button height visually */
+        .filters-row .form-select { height: calc(2.25rem + 6px); } /* match button height visually */
+
+        /* Improve muted text contrast across dashboard so hidden/too-dark text becomes visible */
+        .better-contrast, .text-muted { color: var(--muted-contrast) !important; }
+        .table.table-dark .text-muted { color: var(--muted-contrast) !important; }
+        .empty-row { color: var(--muted-contrast) !important; font-weight: 500; }
+
+        /* Segmented toggle control (balanced size) */
+        .btn-segment {
+          display: inline-flex;
+          background: rgba(255,255,255,0.03);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 8px;
+          padding: 3px;
+          align-items: center;
+          gap: 6px;
+        }
+        .btn-segment .seg-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          padding: 6px 12px;
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-main);
+          border: none;
+          font-weight: 600;
+          font-size: 0.9rem;
+          height: 36px;
+          line-height: 1;
+          text-decoration: none;
+          transition: background .12s ease, transform .06s ease;
+        }
+        .btn-segment .seg-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,0.02); }
+        .btn-segment .seg-btn.active {
+          background: linear-gradient(180deg, var(--accent-blue-2), var(--accent-blue));
+          color: #fff;
+          box-shadow: 0 6px 18px rgba(11,116,255,0.14);
+        }
+        .btn-segment .seg-divider {
+          width: 1px;
+          height: 22px;
+          background: rgba(255,255,255,0.06);
+          margin: 0 2px;
+          border-radius: 1px;
+        }
+
+        /* make small helper line visible left of roster (so text is visible without dragging) */
+        .helper-line {
+            display: inline-block;
+            background: rgba(59,130,246,0.12);
+            color: var(--card-text);
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
 
         /* Modal date visibility */
         .modal .small.text-light { color: #e6eef8 !important; }
+
+        /* Ensure empty placeholder rows in tables are visible */
+        .table .empty-row { color: var(--card-text) !important; background: transparent !important; }
 
         @media print {
             @page {
@@ -147,7 +210,7 @@
         <h2 class="fw-extrabold mb-1 d-flex align-items-center gap-2 text-white">
             <i class="fa-solid fa-graduation-cap text-primary fs-2"></i> Department Executive Command Hub
         </h2>
-        <div class="text-secondary small fw-medium">Centralized Academic Operating System for Faculty</div>
+        <div class="text-secondary small fw-medium better-contrast">Centralized Academic Operating System for Faculty</div>
     </div>
 
     <hr class="border-secondary opacity-25 my-3">
@@ -379,7 +442,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-3">No evaluation data available for this student.</td>
+                        <td colspan="9" class="text-center empty-row py-3">No evaluation data available for this student.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -494,7 +557,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-3">No evaluation data available.</td>
+                        <td colspan="9" class="text-center empty-row py-3">No evaluation data available.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -542,7 +605,7 @@
                             <td class="text-light">{{ att.theory_total }}</td>
                             <td><span class="badge bg-dark text-info border border-secondary">{{ att.theory_percentage }}%</span></td>
                         {% else %}
-                            <td colspan="3" class="text-muted small">N/A (No Theory)</td>
+                            <td colspan="3" class="text-light small">N/A (No Theory)</td>
                         {% endif %}
 
                         {% if att.practical_total > 0 %}
@@ -550,7 +613,7 @@
                             <td class="text-light">{{ att.practical_total }}</td>
                             <td><span class="badge bg-dark text-info border border-secondary">{{ att.practical_percentage }}%</span></td>
                         {% else %}
-                            <td colspan="3" class="text-muted small">N/A (No Lab)</td>
+                            <td colspan="3" class="text-light small">N/A (No Lab)</td>
                         {% endif %}
 
                         <td class="fw-semibold text-white">{{ att.total_attended }} / {{ att.total_classes_conducted }}</td>
@@ -571,7 +634,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="10" class="text-center text-muted py-3">No attendance records registered for this student.</td>
+                        <td colspan="10" class="text-center empty-row py-3">No attendance records registered for this student.</td>
                     </tr>
                     {% endfor %}
                 </tbody>
@@ -612,7 +675,7 @@
         </div>
     </div>
 
-    <div class="row g-4 mb-4"> <!-- charts (kept) --> 
+    <div class="row g-4 mb-4">
         <div class="col-lg-6">
             <div class="card-glass p-4 h-100">
                 <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Subject Performance Comparison</h5>
@@ -655,7 +718,7 @@
                 <div class="table-responsive">
                     <table class="table table-dark-custom">
                         <thead>
-                            <tr class="text-muted"><th>Rank</th><th>Roll No</th><th>Name</th><th>Class</th><th>Overall Mean</th></tr>
+                            <tr class="text-white"><th>Rank</th><th>Roll No</th><th>Name</th><th>Class</th><th>Overall Mean</th></tr>
                         </thead>
                         <tbody>
                             {% for top in department_toppers %}
@@ -675,7 +738,7 @@
                                 <td><span class="badge bg-success fs-6">{{ top.avg_marks|default:0 }}%</span></td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="5" class="text-center text-muted">No student rankers data available.</td></tr>
+                            <tr><td colspan="5" class="text-center empty-row py-4">No student rankers data available.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -689,7 +752,7 @@
                 <div class="table-responsive">
                     <table class="table table-dark-custom">
                         <thead>
-                            <tr class="text-muted"><th>Roll No</th><th>Name</th><th>Attendance</th><th>Failure Risk</th><th>Action Plan</th></tr>
+                            <tr class="text-white"><th>Roll No</th><th>Name</th><th>Attendance</th><th>Failure Risk</th><th>Action Plan</th></tr>
                         </thead>
                         <tbody>
                             {% for bot in bottom_remedial_roster %}
@@ -709,7 +772,7 @@
                                 <td><small class="text-warning">{{ bot.remedial }}</small></td>
                             </tr>
                             {% empty %}
-                            <tr><td colspan="5" class="text-center text-muted">No students currently flagged for remedial risk.</td></tr>
+                            <tr><td colspan="5" class="text-center empty-row py-4">No students currently flagged for remedial risk.</td></tr>
                             {% endfor %}
                         </tbody>
                     </table>
@@ -721,17 +784,28 @@
     <!-- Roster updated: includes Roll vs Rank toggle and full columns (Total Marks / Percentage / Grade / Pass-Fail) -->
     <div class="card-glass p-4 mb-4">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
+            <div>
+                <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
+                <div class="helper-line small better-contrast">💡 Click on any student row to inspect their full 360° Parent Dossier</div>
+            </div>
 
-            <!-- Toggle: Roll vs Rank (preserve filters/search) -->
-            <div class="btn-group btn-group-sm no-print" role="group" aria-label="Sort Mode">
-                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll" class="btn {% if sort_mode == 'roll' or not sort_mode %}btn-primary{% else %}btn-outline-light{% endif %}">Roll Number Order</a>
-                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=rank" class="btn {% if sort_mode == 'rank' %}btn-primary{% else %}btn-outline-light{% endif %}">Ranking Order</a>
+            <!-- Segmented toggle: Roll vs Rank (balanced size) -->
+            <div class="no-print" role="group" aria-label="Sort Mode">
+              <div class="btn-segment">
+                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll"
+                   class="seg-btn {% if sort_mode == 'roll' or not sort_mode %}active{% endif %}">
+                   <i class="fa-solid fa-hashtag me-1"></i>Roll Number Order
+                </a>
+                <span class="seg-divider" aria-hidden="true"></span>
+                <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=rank"
+                   class="seg-btn {% if sort_mode == 'rank' %}active{% endif %}">
+                   <i class="fa-solid fa-trophy me-1"></i>Ranking Order
+                </a>
+              </div>
             </div>
         </div>
 
-        <small class="text-muted d-block mb-3">💡 Click on any student row to inspect their full 360° Parent Dossier</small>
-        <div class="table-responsive">
+        <div class="table-responsive mt-2">
             <table class="table table-dark-custom">
                 <thead>
                     <tr class="text-muted">
@@ -779,7 +853,6 @@
                         </strong></td>
                         <td>
                             {% if item.grade %}{{ item.grade }}{% else %}
-                                {% comment %} Try to infer grade if grade not present {% endcomment %}
                                 {% if item.percentage is not None %}
                                     {% if item.percentage >= 90 %}A+{% elif item.percentage >= 80 %}A{% elif item.percentage >= 70 %}B+{% elif item.percentage >= 60 %}B{% elif item.percentage >= 50 %}C{% elif item.percentage >= 40 %}D{% else %}F{% endif %}
                                 {% else %}-{% endif %}
@@ -801,7 +874,7 @@
                         <td><button class="btn btn-sm btn-outline-primary py-0"><i class="fa-solid fa-magnifying-glass me-1"></i>Inspect</button></td>
                     </tr>
                     {% empty %}
-                    <tr><td colspan="10" class="text-center text-muted py-4">No student records found. Upload an Excel sheet to populate data.</td></tr>
+                    <tr><td colspan="10" class="text-center empty-row py-4">No student records found. Upload an Excel sheet to populate data.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -969,7 +1042,7 @@
                             </tr>
                             {% empty %}
                             <tr>
-                                <td colspan="3" class="text-center text-muted py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
+                                <td colspan="3" class="text-center empty-row py-4">No uploaded Excel history found. Upload a sheet to track batches.</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -1014,184 +1087,223 @@
         </div>
     </div>
 </div>
-
 <script>
-/*
-  Best export flow (Option A):
-  - Clone dossier content, expand scrollable regions
-  - Convert canvases (Chart.js) to images to ensure charts appear in PDF
-  - Use html2pdf to generate A4 PDF; fallback to printing
-  - Clean up clone and restore UI (cursor + button) so page isn't stuck
-*/
- async function exportDossierPDF() {
+async function exportDossierPDF() {
     const btn = document.getElementById('exportPdfBtn');
     const originalText = btn ? btn.innerHTML : '';
+    
     try {
-        if (btn) { btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Preparing PDF...'; btn.disabled = true; }
-        // Give browser a moment to update the UI
-        await new Promise(r => setTimeout(r, 80));
+        if (btn) { 
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i> Generating PDF...'; 
+            btn.disabled = true; 
+        }
+        
         document.body.style.cursor = 'wait';
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 50)));
 
-        const source = document.getElementById('dossierContent');
-        if (!source) throw new Error('Dossier content element not found');
-
-        // Clone and sanitize for print
+        const source = document.getElementById('dossierContent') || document.querySelector('.container-fluid') || document.body;
         const clone = source.cloneNode(true);
 
-        // Remove interactive / no-print elements
-        clone.querySelectorAll('.no-print, .modal, .btn, button, [data-bs-toggle], .modal-backdrop, .alert, form, input, select, textarea').forEach(n => {
-            try { n.parentNode && n.parentNode.removeChild(n); } catch (e) {}
-        });
+        // Strip out buttons, controls, and interactive elements entirely
+        clone.querySelectorAll('.no-print, .btn, button, .modal, script, input, select, hr, a[href*="back"]').forEach(n => n.remove());
 
-        // Convert Chart.js canvases to images to ensure charts appear in print
-        const canvases = Array.from(clone.querySelectorAll('canvas'));
-        for (const c of canvases) {
+        // Convert canvases to sharp images
+        clone.querySelectorAll('canvas').forEach(c => {
             try {
-                const dataUrl = c.toDataURL('image/png');
                 const img = document.createElement('img');
-                img.src = dataUrl;
-                img.style.maxWidth = '100%';
-                img.style.height = 'auto';
-                if (c.width) img.style.width = Math.min(c.width, 900) + 'px';
+                img.src = c.toDataURL('image/png');
+                img.style.cssText = 'max-width:100%; height:auto; display:block; margin:4px auto; max-height:80px;';
                 c.parentNode.replaceChild(img, c);
-            } catch (err) {
-                console.warn('Canvas->img conversion error (continuing):', err);
-            }
-        }
-
-        // Capture important stylesheet links (bootstrap, fontawesome, google fonts) to preserve look
-        const headLinks = `
-            <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-            <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-            <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-        `;
-
-        // Professional print CSS - keeps colors and readability
-        const printCss = `
-            @page { size: A4 portrait; margin: 12mm 10mm; }
-            html, body { background: #ffffff !important; color: #222 !important; -webkit-print-color-adjust: exact; }
-            body { font-family: 'Plus Jakarta Sans', Arial, Helvetica, sans-serif; font-size: 11px; margin: 0; padding: 0; }
-            .print-wrapper { box-sizing: border-box; width: 100%; padding: 8mm; color: #111; }
-            .print-header { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
-            .print-header .logo { font-size:22px; color:#0b0f19; }
-            .print-header .title { font-weight:700; font-size:16px; color:#0b1220; }
-            .print-header .meta { margin-left:auto; font-size:10px; color:#444; text-align:right; }
-
-            /* Card styling adjusted for print */
-            .card-glass, .ai-terminal {
-                background: #fff !important;
-                border: 1px solid #e6e9ee !important;
-                box-shadow: none !important;
-                border-radius: 8px !important;
-                padding: 10px !important;
-                margin-bottom: 10px !important;
-            }
-            h5 { color: #0b1220 !important; }
-
-            /* Table styling for readability */
-            table { border-collapse: collapse; width: 100%; margin-bottom: 6px; }
-            table th, table td { border: 1px solid #e3e6ea !important; padding: 6px 8px !important; color: #111 !important; font-size: 10pt; }
-            table th { background: #f7f8fa !important; font-weight:600; }
-            .table-dark-custom { color: #111 !important; }
-
-            /* Notice box */
-            .notice-box { background: #0b1220; color: #fff; padding: 12px; border-radius: 6px; }
-            .notice-box p { margin:0; font-size:10.5pt; color: #f3f7fb; }
-
-            /* Footer fixed with page number (page counter often supported by Chromium) */
-            .print-footer { position: fixed; bottom: 8mm; left: 0; right: 0; text-align: center; font-size: 10px; color: #666; }
-            .print-footer .page:after { content: "Page " counter(page); }
-
-            /* Ensure charts/images scale */
-            img { max-width: 100%; height: auto; display:block; }
-
-            /* Prevent breaking inside important blocks */
-            .card-glass, .ai-terminal, .table-responsive, table, .print-section { page-break-inside: avoid; break-inside: avoid; }
-
-            /* Hide anything remaining interactive */
-            .no-print, .btn, button, nav, footer, input, select, textarea { display:none !important; }
-        `;
-
-        // Build header HTML
-        const headerHtml = `
-            <div class="print-header">
-                <div class="logo"><i class="fa-solid fa-graduation-cap"></i></div>
-                <div>
-                    <div class="title">Department Executive Command Hub</div>
-                    <div style="font-size:11px; color:#555;">Centralized Academic Operating System for Faculty</div>
-                </div>
-                <div class="meta">${new Date().toLocaleString()}</div>
-            </div>
-        `;
-
-        // Open new print window
-        const w = window.open('', '_blank');
-        if (!w) {
-            // popup blocked; fallback: print current window (non-blocking)
-            window.print();
-            return;
-        }
-
-        // Compose and write the print document
-        w.document.open();
-        w.document.write(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`);
-        w.document.write(headLinks);
-        w.document.write(`<style>${printCss}</style>`);
-        w.document.write('</head><body>');
-        w.document.write('<div class="print-wrapper">');
-        w.document.write(headerHtml);
-        w.document.write('<div class="print-content">');
-        w.document.write(clone.innerHTML);
-        w.document.write('</div>'); // print-content
-        w.document.write('</div>'); // print-wrapper
-        w.document.write('<div class="print-footer"><span class="page"></span></div>');
-        w.document.write('</body></html>');
-        w.document.close();
-
-        // Wait for images to load in new window
-        const waitImgs = new Promise(resolve => {
-            try {
-                const imgs = w.document.images;
-                if (!imgs || imgs.length === 0) return resolve();
-                let loaded = 0;
-                for (let i = 0; i < imgs.length; i++) {
-                    if (imgs[i].complete) loaded++;
-                    else {
-                        imgs[i].onload = imgs[i].onerror = () => {
-                            loaded++;
-                            if (loaded >= imgs.length) resolve();
-                        };
-                    }
-                }
-                // safety timeout
-                setTimeout(() => resolve(), 2000);
-            } catch (e) { resolve(); }
+            } catch (e) {}
         });
 
-        await waitImgs;
+        const printWindow = window.open('', '_blank', 'width=1200,height=1000');
+        if (!printWindow) throw new Error('Popup blocked');
 
-        // Allow layout, then print
-        setTimeout(() => {
-            try {
-                w.focus();
-                w.print();
-                // try to close after short delay
-                setTimeout(() => { try { w.close(); } catch (e) {} }, 800);
-            } catch (err) {
-                console.warn('Print invocation failed:', err);
+        // Fixed CSS: white-space set to normal so long text like AI Remedial Action Plan never clips or hides characters
+        const printCSS = `
+            @page { 
+                size: A4 portrait; 
+                margin: 10mm; 
             }
-        }, 350);
+            * { 
+                box-sizing: border-box; 
+                -webkit-print-color-adjust: exact !important; 
+                color-adjust: exact !important; 
+            }
+            html, body {
+                background: #0b0f19 !important;
+                color: #f8fafc !important;
+                font-family: 'Plus Jakarta Sans', Arial, Helvetica, sans-serif;
+                font-size: 8pt;
+                line-height: 1.3;
+                margin: 0 !important;
+                padding: 0 !important;
+                height: auto !important;
+                overflow: visible !important;
+            }
+            .exact-dashboard-wrapper {
+                width: 100% !important;
+                max-width: 100% !important;
+                background: #0b0f19 !important;
+                padding: 0 !important;
+                transform: none !important;
+            }
+            
+            /* Top Blue Student Banner */
+            .dossier-title-card, div[style*="background: linear-gradient"], .card:first-of-type, div[class*="bg-primary"], div[style*="background:#0b1220"] {
+                background: #2563eb !important;
+                color: #ffffff !important;
+                padding: 12px 16px !important;
+                border-radius: 8px !important;
+                margin-bottom: 12px !important;
+                break-inside: avoid;
+            }
+            .dossier-title-card *, span, h4, p, div {
+                color: #ffffff !important;
+            }
+
+            /* 4 Metrics Side-by-Side Horizontal Row */
+            .row, .metrics-grid, div[class*="row"] {
+                display: flex !important;
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                gap: 10px !important;
+                margin-bottom: 12px !important;
+                align-items: stretch !important;
+                break-inside: avoid;
+            }
+            .col, [class*="col-"] {
+                flex: 1 !important;
+                width: 25% !important;
+                max-width: none !important;
+            }
+
+            /* Dark Dashboard Cards */
+            .card, .card-glass, div[class*="card"] {
+                background: #111827 !important;
+                border: 1px solid rgba(255,255,255,0.1) !important;
+                border-radius: 8px !important;
+                box-shadow: none !important;
+                padding: 10px 12px !important;
+                margin-bottom: 12px !important;
+                height: 100% !important;
+                break-inside: avoid;
+            }
+
+            /* Typography */
+            h2, h3, h4, h5, .display-4, .fs-3, .fs-4 { 
+                font-size: 10pt !important; 
+                font-weight: 700 !important; 
+                margin: 0 0 4px 0 !important; 
+                color: #ffffff !important; 
+            }
+            p, span, div {
+                color: #cbd5e1 !important;
+            }
+            .text-primary, [class*="text-"] {
+                color: #38bdf8 !important;
+                font-weight: 800 !important;
+            }
+
+            /* Tables Configuration - Fully visible text wrapping, preventing any data clipping */
+            table {
+                width: 100% !important;
+                max-width: 100% !important;
+                border-collapse: collapse !important;
+                margin-bottom: 12px !important;
+                background: #111827 !important;
+                break-inside: auto;
+            }
+            tr {
+                break-inside: avoid;
+                break-after: auto;
+            }
+            thead {
+                display: table-header-group;
+            }
+            th, td {
+                border: 1px solid rgba(255,255,255,0.15) !important;
+                padding: 6px 8px !important;
+                font-size: 7.5pt !important;
+                color: #f8fafc !important;
+                text-align: left;
+                background: #111827 !important;
+                word-break: normal !important;
+                overflow: visible !important;
+                white-space: normal !important;
+            }
+            th {
+                background-color: #1f2937 !important;
+                font-weight: 700 !important;
+                color: #ffffff !important;
+            }
+            
+            /* Status Badges */
+            .badge, span[class*="badge"], .pass-badge {
+                padding: 3px 6px !important;
+                font-size: 7pt !important;
+                font-weight: 700 !important;
+                border-radius: 4px !important;
+            }
+
+            /* Notice Box / AI Synthesizer */
+            .notice-box, .ai-terminal {
+                background: #111827 !important;
+                border: 1px solid rgba(255,255,255,0.15) !important;
+                color: #f8fafc !important;
+                padding: 10px 12px !important;
+                border-radius: 8px !important;
+                margin-top: 6px;
+                margin-bottom: 12px !important;
+                break-inside: avoid;
+            }
+            .notice-box p, .ai-terminal p, .ai-terminal li {
+                color: #e2e8f0 !important;
+                font-size: 8pt !important;
+                margin-bottom: 4px !important;
+                white-space: normal !important;
+            }
+
+            img { max-width: 100% !important; height: auto !important; }
+            .no-print, ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
+        `;
+
+        printWindow.document.open();
+        printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Parent-Teacher Meeting Dossier</title>
+                <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+                <style>${printCSS}</style>
+            </head>
+            <body>
+                <div class="exact-dashboard-wrapper">
+                    ${clone.innerHTML}
+                </div>
+            </body>
+            </html>
+        `);
+        printWindow.document.close();
+
+        setTimeout(() => {
+            printWindow.focus();
+            printWindow.print();
+            setTimeout(() => { try { printWindow.close(); } catch(e){} }, 500);
+        }, 300);
 
     } catch (err) {
-        console.error('Export PDF error:', err);
-        try { window.print(); } catch (e) { console.warn('Fallback print failed', e); }
+        console.error('Print Error:', err);
+        alert('Could not generate PDF popup. Please check your browser popup blocker settings.');
     } finally {
         if (btn) { btn.innerHTML = originalText; btn.disabled = false; }
         document.body.style.cursor = 'default';
     }
 }
 </script>
-
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
