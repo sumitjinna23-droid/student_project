@@ -1,0 +1,42 @@
+{% extends "admin/base.html" %}
+{% load i18n static %}
+
+{% block branding %}
+<h1 id="site-name">
+  <a href="{% url 'admin:index' %}">{{ site_header|default:_('College Analytics Admin') }}</a>
+</h1>
+{% endblock %}
+
+{% block usertools %}
+{% if has_permission %}
+<div id="user-tools">
+  {% block welcome-msg %}
+    {% translate 'Welcome,' %}
+    <strong>
+      {% if request.user.is_authenticated %}
+        {% firstof request.user.get_full_name request.user.get_username %}
+      {% endif %}
+    </strong>.
+  {% endblock %}
+  {% block userlinks %}
+    <a href="/dashboard/" class="button" style="margin-right:10px;">{% translate 'Dashboard' %}</a>
+    {% if site_url %}
+      <a href="{{ site_url }}">{% translate 'View site' %}</a> /
+    {% endif %}
+    {% if user.is_active and user.is_staff %}
+      {% url 'django-admindocs-docroot' as docsroot %}
+      {% if docsroot %}
+        <a href="{{ docsroot }}">{% translate 'Documentation' %}</a> /
+      {% endif %}
+    {% endif %}
+    {% if user.has_usable_password %}
+      <a href="{% url 'admin:password_change' %}">{% translate 'Change password' %}</a> /
+    {% endif %}
+    <form id="logout-form" method="post" action="{% url 'admin:logout' %}">
+      {% csrf_token %}
+      <button type="submit">{% translate 'Log out' %}</button>
+    </form>
+  {% endblock %}
+</div>
+{% endif %}
+{% endblock %}

@@ -25,19 +25,25 @@ SECRET_KEY = 'django-insecure-2y=-f98p66eww$s%+$d9j&c$v1#tdq2x4#^w#@$r=*0%n3yddy
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+# For local-network testing only. In production set explicit hostnames.
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'students',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'students',
+
+    # Your apps
+    
+
+    # 3rd party
     'import_export',
 ]
 
@@ -53,13 +59,17 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'student_project.urls'
 
+# Templates: include project-level templates directory PLUS app templates (APP_DIRS=True)
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
-        'APP_DIRS': True,
+        # Add a top-level templates/ dir so you can place global templates there
+        'DIRS': [ BASE_DIR / 'templates' ],
+        'APP_DIRS': True,  # allows Django to find app/templates/<app>/...
         'OPTIONS': {
             'context_processors': [
+                # standard processors (include debug while DEBUG=True)
+                'django.template.context_processors.debug',
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
@@ -73,7 +83,7 @@ WSGI_APPLICATION = 'student_project.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
+# SQLite is fine for local testing. For heavier loads use PostgreSQL.
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -116,19 +126,44 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Use a leading slash for STATIC_URL (works both dev & production)
+STATIC_URL = '/static/'
+STATICFILES_DIRS = [BASE_DIR / 'static']  # your project-level static files
+STATIC_ROOT = BASE_DIR / 'staticfiles'    # collectstatic target for production
+
+# Media files configuration (for user uploads like Excel files)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-# Media files configuration (for user uploads like Excel files)
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
 
+# Login redirect / URL names
 LOGIN_URL = 'students:login'
 
-# settings.py
+
+# EMAIL for local testing (prints emails to console). Replace with SMTP in production.
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+
+# Authentication backends - your unified backend first, then Django fallback
+AUTHENTICATION_BACKENDS = [
+    'students.backends.UnifiedDatabaseBackend',   # custom unified backend (local onboarding)
+    'django.contrib.auth.backends.ModelBackend',  # fallback
+]
+
+
+# Session settings (DB-backed sessions are safer for concurrent users)
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 1 week
+SESSION_SAVE_EVERY_REQUEST = True
+
+
+# Additional helpful defaults (development)
+# You can remove or tighten these for production
+CSRF_COOKIE_HTTPONLY = False
+SECURE_BROWSER_XSS_FILTER = True
+X_FRAME_OPTIONS = 'DENY'

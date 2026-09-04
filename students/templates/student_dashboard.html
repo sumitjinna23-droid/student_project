@@ -194,7 +194,7 @@
                         {{ request.user.username }}
                     {% endif %}
                 </strong>
-                {% if student.roll_number %}(Roll Number: {{ student.roll_number }}){% endif %}
+                {% if student.roll_number|upper %}(Roll Number: {{ student.roll_number }}){% endif %}
             </div>
         </div>
         <div class="header-actions">
@@ -369,7 +369,7 @@
     </div>
 
     <!-- 4. Excel Sheet Upload History & Academic Year Deletion Management -->
-    {% if request.user.is_staff or is_teacher %}
+    {% if request.user.is_authenticated and request.user.is_staff or request.user.is_authenticated and is_teacher %}
     <div class="card">
         <h3 style="color: #38bdf8; margin-top: 0;">📂 Academic Year Excel History & Data Management</h3>
         <table>

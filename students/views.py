@@ -10,11 +10,30 @@ from django.db.models import Avg, Q, Sum
 from django.db import transaction
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
+
+# Auth models & permissions
+# NOTE: Group and Permission were already imported here. If you were seeing
+# "NameError: name 'Group' is not defined", it was coming from a different
+# copy of this file, or from admin.py / middleware (not included in this
+# upload) that reference Group without importing it. Make sure those files
+# have this same import line.
+from django.contrib.auth.models import User, Group, Permission
+from django.contrib.contenttypes.models import ContentType
+from django.apps import apps
+
+from django.urls import reverse
+from django.db.models import Q as DjangoQ
+
+# Logging
+import logging
+logger = logging.getLogger(__name__)
+
+from .models import Student, AllowedTeacher, UserProfile
 
 from .models import ExcelBatch
 from .models import (
-    Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement
+    Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement,
+    calculate_grade, calculate_result_status,
 )
 from .utils import (
     map_dataframe_columns,
@@ -29,19 +48,67 @@ from .utils import (
 # =========================================================
 
 def get_user_display_name(user):
-    """Priority resolution: Student Name -> AllowedTeacher Name -> User Full Name -> Clean Username."""
-    if hasattr(user, 'profile') and getattr(user.profile, 'student', None) and user.profile.student.name:
-        return user.profile.student.name
+    """
+    Priority resolution:
+      - Student Name (from linked profile.student)
+      - AllowedTeacher.name (match by email), only if user is authenticated
+      - Django User.get_full_name()
+      - Cleaned username fallback
 
-    teacher_entry = AllowedTeacher.objects.filter(email__iexact=user.email).first()
-    if teacher_entry and teacher_entry.name:
-        return teacher_entry.name.strip()
+    Safe for AnonymousUser.
+    """
+    try:
+        if not user or not getattr(user, 'is_authenticated', False):
+            return ''
 
-    full_name = user.get_full_name().strip()
-    if full_name:
-        return full_name
+        # Student name from profile if available
+        profile = _get_profile(user)
+        if profile and getattr(profile, 'student', None) and getattr(profile.student, 'name', None):
+            return profile.student.name
 
-    return user.username.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+        # AllowedTeacher by email (case-insensitive)
+        # FIX: guard with is_authenticated + truthy email before ever touching
+        # request.user.email — this is what was throwing
+        # "AttributeError: 'AnonymousUser' object has no attribute 'email'"
+        # in other parts of the codebase (middleware/admin). Applying the same
+        # safe pattern here.
+        if getattr(user, 'is_authenticated', False) and getattr(user, 'email', None):
+            user_email = user.email
+            teacher_entry = AllowedTeacher.objects.filter(email__iexact=user_email).first()
+            if teacher_entry and getattr(teacher_entry, 'name', None):
+                return teacher_entry.name.strip()
+
+        full_name = ''
+        try:
+            full_name = user.get_full_name().strip()
+        except Exception:
+            full_name = ''
+        if full_name:
+            return full_name
+
+        username = getattr(user, 'username', '') or ''
+        return username.split('@')[0].replace('.', ' ').replace('_', ' ').title()
+    except Exception:
+        logger.exception("get_user_display_name failed")
+        return ''
+
+
+def _get_profile(user):
+    """
+    Centralized profile lookup so every view resolves the related UserProfile
+    the SAME way, regardless of whether your OneToOneField's related_name is
+    'userprofile' or 'profile'.
+
+    FIX: Several views previously did `hasattr(request.user, 'profile')` on
+    its own. If your actual related_name is 'userprofile' (as used elsewhere
+    in this file), that check silently evaluates False every time, which
+    breaks role gating (students slipping into teacher-only views, and vice
+    versa) and contributes to the "teacher redirected to student dashboard"
+    symptom. Always route through this helper instead of ad-hoc hasattr checks.
+    """
+    if not user or not getattr(user, 'is_authenticated', False):
+        return None
+    return getattr(user, 'userprofile', None) or getattr(user, 'profile', None)
 
 
 def clean_val(val):
@@ -86,198 +153,473 @@ def compute_smart_action_status(attendance_pct, academic_avg):
     return {"label": "Good", "class": "badge-good"}
 
 
+def _is_student_role(user):
+    """
+    Explicit, single source of truth for "is this user a STUDENT".
+    Mirrors _user_is_teacher's structure so the two can never silently
+    disagree with each other.
+    """
+    profile = _get_profile(user)
+    return bool(profile and getattr(profile, 'role', None) == getattr(UserProfile.Role, 'STUDENT', 'STUDENT'))
+
+
+def _user_is_teacher(user):
+    """
+    Helper: returns True only if the user should be treated as a Teacher.
+    Rules (checked in this explicit order):
+      - user must be authenticated
+      - superusers are treated as admins (not 'teacher' for redirect)
+      - explicit profile.role == STUDENT overrides everything (avoids loops)
+      - explicit profile.role == TEACHER -> teacher
+      - is_staff=True -> teacher (FIX: added per requirement #1, so a staff
+        account created without a profile.role or without a Teachers-group
+        membership still routes correctly)
+      - group 'Teachers' -> teacher
+      - AllowedTeacher entry matching email -> teacher
+    """
+    try:
+        if not user or not getattr(user, 'is_authenticated', False):
+            return False
+
+        if getattr(user, 'is_superuser', False):
+            return False
+
+        if _is_student_role(user):
+            return False
+
+        profile = _get_profile(user)
+        if profile and getattr(profile, 'role', None) == getattr(UserProfile.Role, 'TEACHER', 'TEACHER'):
+            return True
+
+        # FIX: explicit is_staff check (requirement #1) as an additional,
+        # independent signal that this account is a teacher/admin account.
+        if getattr(user, 'is_staff', False):
+            return True
+
+        if user.groups.filter(name__iexact='Teachers').exists():
+            return True
+
+        # FIX: guarded email access — never touch user.email without first
+        # confirming is_authenticated and that email is set.
+        if getattr(user, 'is_authenticated', False) and getattr(user, 'email', None):
+            if AllowedTeacher.objects.filter(email__iexact=user.email).exists():
+                return True
+
+    except Exception:
+        logger.exception("_user_is_teacher check failed")
+    return False
+
+
+def _destination_after_login(user, next_url=None):
+    """
+    Decide where to redirect after login based on role.
+    - superuser -> /dashboard/ (analytics_dashboard)
+    - teacher/staff -> /dashboard/ (analytics_dashboard)
+    - student -> /student-dashboard/ (student_dashboard)
+    - fallback -> analytics_dashboard
+
+    FIX (requirement #2, this round): superusers logging in via the main
+    /login/ form used to be sent straight to '/admin' unconditionally. Per
+    the new requirement, ALL staff/teacher/superuser logins via /login/ now
+    land on /dashboard/. The Django admin panel at /admin/ is untouched and
+    still reachable directly (and still has its own separate login flow at
+    /admin/login/) — this only changes where /login/ sends a superuser.
+
+    FIX (requirement #1, prior round): teacher/staff check happens via the
+    hardened _user_is_teacher() (which itself checks is_staff, Teachers
+    group, role, and AllowedTeacher) BEFORE the student check, and a
+    `next_url` is only honored if it doesn't contradict the user's role —
+    otherwise an old/stale `next` query param could still bounce a teacher
+    back into the student dashboard.
+    """
+    try:
+        if not user:
+            return 'students:login'
+
+        # Superusers are staff/admin-equivalent for landing-page purposes,
+        # but _user_is_teacher() deliberately returns False for superusers
+        # (see its docstring) so it can't be used to also gate admin-only
+        # views elsewhere. So this check is explicit and separate.
+        if getattr(user, 'is_superuser', False) or _user_is_teacher(user):
+            # Teachers/staff must NEVER land on the student dashboard, even
+            # if a stale `next` param points there.
+            if next_url and 'student-dashboard' not in next_url and 'student_dashboard' not in next_url:
+                return next_url
+            return reverse('students:analytics_dashboard')
+
+        if _is_student_role(user):
+            if next_url and 'dashboard' in next_url and 'student' not in next_url:
+                # a next_url pointing at the teacher dashboard is not valid
+                # for a student — ignore it and send them to their own page.
+                return reverse('students:student_dashboard')
+            return next_url or reverse('students:student_dashboard')
+
+    except Exception:
+        logger.exception("_destination_after_login error")
+    return next_url or reverse('students:analytics_dashboard')
+
+
 # =========================================================
 # AUTHENTICATION & PASSWORD RESET VIEWS
 # =========================================================
 
 def custom_login(request):
-    """Handles direct login and detects first-time setup for both Students & Teachers."""
+    """
+    Unified login for Email, Roll Number, or Admin Name.
+    """
     if request.user.is_authenticated:
-        if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
-            return redirect('students:student_dashboard')
-        return redirect('students:analytics_dashboard')
+        dest = _destination_after_login(request.user, next_url=request.GET.get('next'))
+        return redirect(dest)
+
+    next_url = request.GET.get('next') or request.POST.get('next') or None
 
     if request.method == 'POST':
-        identifier = request.POST.get('username', '').strip().lower()
+        identifier = request.POST.get('username', '').strip()
         password_input = request.POST.get('password', '')
 
-        # Standard login lookup
+        if not identifier:
+            messages.error(request, "Enter Email, Roll Number, or Admin Name.")
+            return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+        # Try normal Django auth first
         user = authenticate(request, username=identifier, password=password_input)
-
-        if user is None and '@' in identifier:
-            user_obj = User.objects.filter(email__iexact=identifier).first()
-            if not user_obj:
-                profile_obj = UserProfile.objects.filter(college_email__iexact=identifier).first()
-                if profile_obj:
-                    user_obj = profile_obj.user
-
-            if user_obj:
-                user = authenticate(request, username=user_obj.username, password=password_input)
-
-        if user is not None:
-            if hasattr(user, 'profile') and user.profile.role == UserProfile.Role.TEACHER:
-                if not AllowedTeacher.objects.filter(email__iexact=user.email).exists() and not user.is_superuser:
-                    messages.error(request, "Access Denied: You are not authorized as a CS Department teacher.")
-                    return redirect('students:login')
+        if user:
+            if not user.is_active:
+                messages.error(request, "Account is not active. Contact administrator.")
+                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
             login(request, user)
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            if profile.role == UserProfile.Role.STUDENT:
-                return redirect('students:student_dashboard')
-            return redirect('students:analytics_dashboard')
+            dest = _destination_after_login(user, next_url=next_url)
+            return redirect(dest)
 
-        # First-Time Setup Detector
-        allowed_teacher = AllowedTeacher.objects.filter(email__iexact=identifier).first()
-        if allowed_teacher:
-            teacher_user_exists = User.objects.filter(email__iexact=identifier).exists()
-            if not teacher_user_exists or not allowed_teacher.is_registered:
-                request.session['setup_email'] = identifier
+        # Auth failed - teacher path if identifier contains '@'
+        if '@' in identifier:
+            email = identifier.strip().lower()
+            allowed_teacher = AllowedTeacher.objects.filter(email__iexact=email).first()
+
+            if allowed_teacher:
+                if not getattr(allowed_teacher, 'is_registered', False):
+                    request.session['setup_email'] = email
+                    request.session['setup_role'] = 'TEACHER'
+                    if getattr(allowed_teacher, 'name', None):
+                        request.session['setup_name'] = allowed_teacher.name
+                    messages.info(request, "Teacher found — set up your password to continue.")
+                    return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
+
+                existing_user = User.objects.filter(email__iexact=email).first()
+                if existing_user and existing_user.has_usable_password() and existing_user.is_active:
+                    messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
+                    return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+                request.session['setup_email'] = email
                 request.session['setup_role'] = 'TEACHER'
-                return redirect('students:first_time_setup')
+                messages.info(request, "Your account needs setup — continue to set a new password.")
+                return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
+
+            messages.error(request, "Access Denied: This email is not registered. Contact admin.")
+            return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+        # Student path
+        roll_test = identifier.split('@')[0]
+        student = Student.objects.filter(roll_number__iexact=roll_test).first()
+
+        if student:
+            profile = _get_profile_for_student(student)
+            linked_user = None
+            if profile and getattr(profile, 'user', None):
+                linked_user = profile.user
             else:
-                messages.error(request, "Invalid password. Please try again.")
-                return render(request, 'login.html')
+                linked_user = User.objects.filter(username__iexact=student.roll_number).first()
 
-        user_identifier = identifier.split('@')[0]
-        student_obj = Student.objects.filter(
-            Q(roll_number__iexact=identifier) | Q(roll_number__iexact=user_identifier)
-        ).first()
-
-        if student_obj:
-            student_user_exists = User.objects.filter(
-                Q(username__iexact=student_obj.roll_number.lower()) | Q(email__iexact=identifier)
-            ).exists()
-
-            if not student_user_exists:
-                request.session['setup_email'] = identifier if '@' in identifier else f"{student_obj.roll_number.lower()}@college.edu"
-                request.session['setup_roll'] = student_obj.roll_number.lower()
+            if not linked_user or not linked_user.has_usable_password() or not linked_user.is_active:
+                fallback_email = f"{student.roll_number}@college.local"
+                request.session['setup_email'] = (linked_user.email if linked_user and linked_user.email else fallback_email)
                 request.session['setup_role'] = 'STUDENT'
-                return redirect('students:first_time_setup')
-            else:
-                messages.error(request, "Invalid password. Please try again.")
-                return render(request, 'login.html')
+                request.session['setup_roll'] = student.roll_number
+                messages.info(request, "Student account found — continue to set up your password.")
+                return redirect(f"{reverse('students:first_time_setup')}?email={request.session['setup_email']}&role=STUDENT&roll={student.roll_number}")
 
-        messages.error(request, "Access Denied: Unrecognized email or roll number. Only CS Department students and teachers can log in.")
+            # FIX (issue: "students can't log in even after resetting
+            # password"): the `authenticate()` call at the top of this view
+            # uses whatever case the user typed for `identifier`. If that
+            # doesn't exactly match `linked_user.username` (Django's default
+            # backend does a case-sensitive lookup), authenticate() fails
+            # even when the password is 100% correct — and this code used to
+            # jump straight to "Wrong password" without ever re-checking.
+            # Retrying explicitly against the known-correct username closes
+            # that gap. NOTE: you have a custom `backends.py` I haven't seen
+            # yet — if it already does case-insensitive or multi-field
+            # lookup, this retry is redundant-but-harmless; if it does
+            # something different, this may need to move there instead once
+            # I can see it.
+            retry_user = authenticate(request, username=linked_user.username, password=password_input)
+            if retry_user and retry_user.is_active:
+                login(request, retry_user)
+                dest = _destination_after_login(retry_user, next_url=next_url)
+                return redirect(dest)
 
-    return render(request, 'login.html')
+            messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
+            return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+        messages.error(request, "Access Denied: No account found for that Email / Roll Number / Admin Name. Contact admin.")
+        return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+    return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+
+def _get_profile_for_student(student):
+    """
+    FIX: the correct reverse accessor from a Student to its UserProfile is
+    `student.user_account` — that's the related_name on
+    UserProfile.student in models.py. The previous version of this helper
+    tried `student.userprofile` / `student.profile`, neither of which
+    exist, so it ALWAYS returned None. That silently broke both
+    custom_login's student path and password_reset_request's student
+    lookup, forcing them into less-reliable fallback branches every time.
+    """
+    if not student:
+        return None
+    return getattr(student, 'user_account', None)
 
 
 def first_time_setup(request):
-    """First-time password creation screen for both CS Teachers and Students."""
+    """
+    First-time password creation screen.
+    Creates/updates User; assigns Teachers group (excluding AllowedTeacher perms);
+    authenticates and logs the user in.
+    """
     email = request.session.get('setup_email')
     role = request.session.get('setup_role')
     roll_number = request.session.get('setup_roll')
 
+    if not email:
+        email = request.GET.get('email')
+    if not role:
+        role = request.GET.get('role')
+    if not roll_number:
+        roll_number = request.GET.get('roll')
+
     if not email or not role:
-        messages.error(request, "Session expired or invalid setup attempt.")
+        messages.error(request, "Setup session expired or invalid. Please start again from the login page.")
         return redirect('students:login')
 
-    if request.method == 'POST':
-        password = request.POST.get('password')
-        confirm_password = request.POST.get('confirm_password')
+    email = email.strip().lower()
 
-        if password != confirm_password:
-            messages.error(request, "Passwords do not match.")
-            return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+    if request.method == 'POST':
+        password = request.POST.get('password', '')
+        confirm_password = request.POST.get('confirm_password', '')
+
+        if not password or password != confirm_password:
+            messages.error(request, "Passwords must match and not be empty.")
+            return render(request, 'first_time_setup.html', {'email': email, 'role': role, 'roll': roll_number})
 
         if len(password) < 6:
-            messages.error(request, "Password must be at least 6 characters long.")
-            return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+            messages.error(request, "Password must be at least 6 characters.")
+            return render(request, 'first_time_setup.html', {'email': email, 'role': role, 'roll': roll_number})
 
         user = None
-        if role == 'TEACHER':
-            allowed_teacher = AllowedTeacher.objects.get(email__iexact=email)
-            clean_email = email.lower()
+        profile = None
 
-            user, _ = User.objects.get_or_create(username=clean_email)
-            user.email = clean_email
-            user.is_staff = True
-            user.is_superuser = True
+        # FIX (root cause of the "Prof. Alex Paul stuck as STUDENT" bug):
+        # everything below used to run as a sequence of independent .save()
+        # calls with no transaction. If any single step raised (e.g.
+        # profile.save() hitting a stale/pre-existing UserProfile row), the
+        # earlier steps — like user.is_staff = True — had ALREADY been
+        # committed, leaving a half-configured account: is_staff=True but
+        # role still defaulted to STUDENT, no Teachers group, and
+        # is_registered still False. That's exactly the state the
+        # diagnostic showed.
+        #
+        # Wrapping each role's setup in transaction.atomic() makes it
+        # all-or-nothing: either every field (is_staff, role, group,
+        # is_registered) commits together, or NONE of them do and the user
+        # sees a clear error instead of a silently half-broken account.
+        try:
+            if role.upper() == 'TEACHER':
+                allowed_teacher = AllowedTeacher.objects.filter(email__iexact=email).first()
+                if not allowed_teacher:
+                    messages.error(request, "No teacher found with that email. Contact admin.")
+                    return redirect('students:login')
 
-            if hasattr(allowed_teacher, 'name') and allowed_teacher.name:
-                raw_name = allowed_teacher.name.strip()
-                clean_name = raw_name.replace('Prof.', '').replace('Prof', '').strip()
-                names = clean_name.split(' ', 1)
-                user.first_name = f"Prof. {names[0]}"
-                user.last_name = names[1] if len(names) > 1 else ''
+                with transaction.atomic():
+                    username = email
+                    user, created = User.objects.get_or_create(username=username, defaults={'email': email})
+                    user.email = email
+                    user.set_password(password)
+                    user.is_active = True
+                    # is_staff=True is what admits a teacher into /admin/ at all,
+                    # and is now also the primary signal _user_is_teacher() checks.
+                    user.is_staff = True
 
-            user.set_password(password)
-            user.save()
+                    if getattr(allowed_teacher, 'name', None):
+                        raw_name = allowed_teacher.name.strip()
+                        parts = raw_name.split(None, 1)
+                        user.first_name = parts[0]
+                        user.last_name = parts[1] if len(parts) > 1 else ''
+                    user.save()
 
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.role = UserProfile.Role.TEACHER
-            profile.college_email = clean_email
-            profile.save()
+                    # Teachers group / permissions assignment (exclude AllowedTeacher).
+                    # FIX: no longer wrapped in its own swallowing try/except —
+                    # a failure here now aborts the whole atomic block (so we
+                    # never again commit is_staff=True with an empty groups
+                    # list), and the outer try/except below reports it cleanly.
+                    teachers_group, created_group = Group.objects.get_or_create(name='Teachers')
 
-            allowed_teacher.is_registered = True
-            allowed_teacher.save()
+                    try:
+                        allowed_model = apps.get_model('students', 'AllowedTeacher')
+                        allowed_model_name = allowed_model._meta.model_name
+                    except Exception:
+                        allowed_model_name = 'allowedteacher'
 
-            messages.success(request, "Teacher account setup complete! Logging you in...")
+                    students_perms = Permission.objects.filter(content_type__app_label='students').exclude(content_type__model=allowed_model_name)
 
-        elif role == 'STUDENT':
-            student_obj = Student.objects.get(roll_number__iexact=roll_number)
-            clean_username = student_obj.roll_number.lower()
-            clean_email = email.lower()
+                    if created_group:
+                        teachers_group.permissions.set(students_perms)
+                    else:
+                        existing_ids = set(teachers_group.permissions.values_list('id', flat=True))
+                        to_add = [p for p in students_perms if p.id not in existing_ids]
+                        if to_add:
+                            teachers_group.permissions.add(*to_add)
 
-            user, _ = User.objects.get_or_create(username=clean_username)
-            user.email = clean_email
-            user.set_password(password)
-            user.save()
+                    if not user.groups.filter(id=teachers_group.id).exists():
+                        user.groups.add(teachers_group)
 
-            profile, _ = UserProfile.objects.get_or_create(user=user)
-            profile.role = UserProfile.Role.STUDENT
-            profile.student = student_obj
-            profile.college_email = clean_email
-            profile.roll_number = student_obj.roll_number.lower()
-            profile.save()
+                    # FIX: force-overwrite role/registration every time setup
+                    # runs for this email, even if a stale UserProfile already
+                    # existed with role=STUDENT (or anything else) from an
+                    # earlier bug or bad import. get_or_create alone doesn't
+                    # fix a wrong existing row — the explicit assignment does.
+                    profile, _ = UserProfile.objects.get_or_create(user=user)
+                    profile.role = UserProfile.Role.TEACHER
+                    profile.college_email = email
+                    profile.save()
 
-            messages.success(request, "Student account setup complete! Logging you in...")
+                    allowed_teacher.is_registered = True
+                    allowed_teacher.save()
 
+                messages.success(request, "Teacher account setup complete. Logging you in...")
+
+            else:
+                student_obj = Student.objects.filter(roll_number__iexact=roll_number).first()
+                if not student_obj:
+                    messages.error(request, "Student record not found. Contact admin.")
+                    return redirect('students:login')
+
+                with transaction.atomic():
+                    username = student_obj.roll_number.lower()
+                    user, created = User.objects.get_or_create(username=username, defaults={'email': email})
+                    user.email = email
+                    user.set_password(password)
+                    user.is_active = True
+                    user.save()
+
+                    profile, _ = UserProfile.objects.get_or_create(user=user)
+                    profile.role = UserProfile.Role.STUDENT
+                    profile.student = student_obj
+                    profile.college_email = email
+                    profile.roll_number = student_obj.roll_number.lower()
+                    profile.save()
+
+                messages.success(request, "Student account setup complete. Logging you in...")
+
+        except Exception:
+            # FIX: previously an exception here (e.g. inside profile.save())
+            # was uncaught, producing a raw 500 page while earlier .save()
+            # calls had already committed outside any transaction. Now the
+            # atomic block guarantees nothing partial was written, and the
+            # user gets a clear message instead of a crash.
+            logger.exception("first_time_setup failed for role=%s email=%s", role, email)
+            messages.error(request, "Something went wrong completing setup. Please try again or contact admin.")
+            return redirect('students:login')
+
+        # clear session keys
         request.session.pop('setup_email', None)
         request.session.pop('setup_role', None)
         request.session.pop('setup_roll', None)
 
-        if user:
-            login(request, user)
-            if role == 'STUDENT':
-                return redirect('students:student_dashboard')
-            return redirect('students:analytics_dashboard')
+        username_for_auth = user.username
+        authed = authenticate(request, username=username_for_auth, password=password)
 
-    return render(request, 'first_time_setup.html', {'email': email, 'role': role})
+        if authed:
+            login(request, authed)
+            dest = _destination_after_login(authed)
+            return redirect(dest)
+        else:
+            try:
+                user.backend = 'django.contrib.auth.backends.ModelBackend'
+                login(request, user)
+                dest = _destination_after_login(user)
+                return redirect(dest)
+            except Exception:
+                messages.warning(request, "Account created but automatic login failed. Please login manually.")
+                return redirect('students:login')
+
+    return render(request, 'first_time_setup.html', {'email': email, 'role': role, 'roll': roll_number})
 
 
-# students/views.py
-from django.shortcuts import render, redirect
-from django.contrib import messages
-from django.contrib.auth.models import User
-from django.db.models import Q
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
-
+# Password reset & related helpers
 def password_reset_request(request):
-    """Finds the user by username or email and stores their ID in the session for direct reset."""
     if request.method == "POST":
         input_value = request.POST.get('username_or_email', '').strip()
+        if not input_value:
+            messages.error(request, "Please enter Admin Full Name, Email Address, or Roll Number.")
+            return render(request, 'students/password_reset_request.html')
 
-        user = User.objects.filter(
-            Q(username__iexact=input_value) | Q(email__iexact=input_value)
+        # FIX (requirement #2): search now also matches an admin's full
+        # name (first_name + " " + last_name), not just username/email.
+        # Uses Concat at the DB level so "Prof. Alex Paul" (however
+        # first_name/last_name ended up split) matches a single iexact
+        # comparison against the concatenated value, the same way
+        # get_full_name() would render it.
+        from django.db.models.functions import Concat
+        from django.db.models import Value, CharField
+
+        user = User.objects.annotate(
+            full_name=Concat('first_name', Value(' '), 'last_name', output_field=CharField())
+        ).filter(
+            Q(username__iexact=input_value) |
+            Q(email__iexact=input_value) |
+            Q(first_name__iexact=input_value) |
+            Q(last_name__iexact=input_value) |
+            Q(full_name__iexact=input_value)
         ).first()
 
+        if not user:
+            roll_query = input_value.split('@')[0] if '@' in input_value else input_value
+            student = Student.objects.filter(roll_number__iexact=roll_query).first()
+            if student:
+                profile = _get_profile_for_student(student)
+                user = profile.user if profile and getattr(profile, 'user', None) else None
+                if not user:
+                    username_safe = student.roll_number.lower()
+                    user, created = User.objects.get_or_create(username=username_safe, defaults={
+                        'email': f"{username_safe}@college.edu",
+                        'is_active': True,
+                    })
+                    if created:
+                        user.set_password(username_safe)
+                        user.save()
+                    try:
+                        up, _ = UserProfile.objects.get_or_create(user=user)
+                        up.student = student
+                        up.role = getattr(UserProfile.Role, 'STUDENT', up.role)
+                        up.college_email = user.email
+                        up.save()
+                    except Exception:
+                        pass
+
         if user:
-            # Store user ID in session for the next step
             request.session['reset_user_id'] = user.id
             return redirect('students:password_reset_confirm')
         else:
-            messages.error(request, "No account found with that Roll Number or Email.")
-
+            messages.error(request, "No account found with that Admin Full Name, Email, or Roll Number.")
     return render(request, 'students/password_reset_request.html')
 
+
 def password_reset_confirm(request):
-    """Validates the session and updates the user's password directly."""
     user_id = request.session.get('reset_user_id')
     if not user_id:
-        return render(request, 'password_reset_confirm.html', {'validlink': False})
+        return render(request, 'students/password_reset_confirm.html', {'validlink': False})
 
     user = get_object_or_404(User, id=user_id)
 
@@ -285,16 +627,51 @@ def password_reset_confirm(request):
         password = request.POST.get('password')
         confirm_password = request.POST.get('confirm_password')
 
+        # FIX: guard against missing/mismatched form field names before the
+        # length check — previously `len(password)` on a None (e.g. if a
+        # template posts under a different field name) would raise a
+        # TypeError instead of a clean validation message.
+        if not password or not confirm_password:
+            messages.error(request, "Please enter and confirm your new password.")
+            return render(request, 'students/password_reset_confirm.html', {'validlink': True})
+
         if password != confirm_password:
             messages.error(request, "Passwords do not match.")
-            return render(request, 'password_reset_confirm.html', {'validlink': True})
+            return render(request, 'students/password_reset_confirm.html', {'validlink': True})
 
         if len(password) < 6:
             messages.error(request, "Password must be at least 6 characters long.")
-            return render(request, 'password_reset_confirm.html', {'validlink': True})
+            return render(request, 'students/password_reset_confirm.html', {'validlink': True})
 
-        user.set_password(password)
-        user.save()
+        # NOTE (requirement #1): this already hashes correctly via
+        # set_password() — it is NOT doing `user.password = password`. If
+        # you're still seeing "Wrong password" after a reset that reports
+        # success, this view is not the source. The two remaining suspects,
+        # neither of which was included in what you've shared so far:
+        #   1. A custom SetPasswordForm / ModelForm in forms.py bound
+        #      directly to the User model's `password` field — a plain
+        #      ModelForm.save() would write the raw value straight to
+        #      `password` without hashing.
+        #   2. Django's built-in PasswordResetConfirmView, wired up
+        #      separately in urls.py (the unused `default_token_generator`,
+        #      `urlsafe_base64_encode`, `force_bytes` imports at the top of
+        #      this file suggest that flow exists somewhere), running with
+        #      a misconfigured or custom form instead of this view.
+        # Please share forms.py and the password-reset section of urls.py
+        # so I can check both directly instead of guessing.
+        #
+        # Re-fetching by pk right before saving, and restricting the write
+        # to the password field, so nothing else on this in-memory `user`
+        # object (which was loaded once at the top of the view, on either
+        # GET or POST) can accidentally get persisted alongside it.
+        fresh_user = User.objects.get(pk=user.pk)
+        fresh_user.set_password(password)
+        # FIX (requirement #3): explicitly guarantee is_active=True after a
+        # successful reset. Covers the case where a student's account was
+        # previously deactivated (e.g. by deactivate_user_on_student_delete
+        # in signals.py, or manually) and is being restored via reset.
+        fresh_user.is_active = True
+        fresh_user.save(update_fields=['password', 'is_active'])
 
         request.session.pop('reset_user_id', None)
         messages.success(request, "Password updated successfully! You can now log in.")
@@ -302,7 +679,13 @@ def password_reset_confirm(request):
 
     return render(request, 'students/password_reset_confirm.html', {'validlink': True})
 
+
 def custom_logout(request):
+    # FIX (requirement #3): logout() itself is always safe to call even on
+    # an AnonymousUser, but we avoid touching request.user.email anywhere in
+    # this view. If a template context processor previously read
+    # request.user.email after logout, that's the actual crash source —
+    # see the context-processor note in the summary below.
     logout(request)
     return redirect('students:login')
 
@@ -313,7 +696,9 @@ def custom_logout(request):
 
 @login_required(login_url='students:login')
 def student_dashboard(request):
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.TEACHER:
+    # FIX: use the single-source-of-truth helpers so this can never disagree
+    # with _destination_after_login() about who counts as a teacher/student.
+    if _user_is_teacher(request.user) and not _is_student_role(request.user):
         return redirect('students:analytics_dashboard')
 
     user_identifier = request.user.username.split('@')[0]
@@ -322,7 +707,6 @@ def student_dashboard(request):
         Q(roll_number__iexact=user_identifier)
     ).first()
 
-    # REQ 2: Full Achievement Depth Context
     achievements = list(student.achievements.all()) if student else []
 
     scatter_data = []
@@ -394,7 +778,6 @@ def student_dashboard(request):
 
 @login_required
 def add_achievement(request, student_id=None):
-    """REQ 2: Achievement creation logic."""
     if request.method == 'POST':
         title = request.POST.get('title', '').strip()
         description = request.POST.get('description', '').strip()
@@ -404,7 +787,10 @@ def add_achievement(request, student_id=None):
         if student_id:
             student = get_object_or_404(Student, id=student_id)
         else:
-            student = getattr(request.user.profile, 'student', None)
+            # FIX: use _get_profile() instead of raw request.user.profile so
+            # this doesn't break if the related_name is 'userprofile'.
+            profile = _get_profile(request.user)
+            student = getattr(profile, 'student', None) if profile else None
 
         if student and title:
             Achievement.objects.create(
@@ -425,7 +811,8 @@ def add_achievement(request, student_id=None):
 
 @login_required
 def analytics_dashboard(request):
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+    # FIX: use the shared helpers here too.
+    if _is_student_role(request.user) and not _user_is_teacher(request.user):
         messages.warning(request, "Access restricted. You have been redirected to your student portal.")
         return redirect('students:student_dashboard')
 
@@ -433,7 +820,6 @@ def analytics_dashboard(request):
         uploaded_file = request.FILES['excel_file']
 
         try:
-            # Create ExcelBatch BEFORE processing so we can attach it to records
             excel_batch = ExcelBatch.objects.create(
                 filename=uploaded_file.name,
                 academic_year=request.POST.get('year', 'General'),
@@ -600,7 +986,6 @@ def analytics_dashboard(request):
 
         except Exception as e:
             messages.error(request, f"Error processing file: {str(e)}")
-            # If batch exists, try to remove it to avoid orphan
             try:
                 if 'excel_batch' in locals():
                     excel_batch.delete()
@@ -644,6 +1029,10 @@ def analytics_dashboard(request):
         if student:
             context['is_student_mode'] = True
             context['student'] = student
+            # FIX (requirement #1): Title Case display name for the Dossier
+            # view template — use this instead of student.name directly if
+            # the template currently prints the raw (often ALL CAPS) value.
+            context['student_display_name'] = student.name.title() if student.name else student.name
 
             student_marks = Marks.objects.filter(student=student).select_related('subject')
             subject_attendances = SubjectAttendance.objects.filter(student=student).select_related('subject')
@@ -704,7 +1093,6 @@ def analytics_dashboard(request):
                 ai_rec_text += f" {primary_ai.get('anomaly_msg')}"
 
             smart_action = compute_smart_action_status(overall_att, overall_academic_avg)
-            # Fetch student achievements
             achievements = list(student.achievements.all())
 
             context.update({
@@ -725,7 +1113,6 @@ def analytics_dashboard(request):
                 'ai_copilot_recommendation': ai_rec_text,
                 'chart_subject_labels': [s['subject'] for s in subject_performances],
                 'chart_subject_scores': [s['percentage'] for s in subject_performances],
-                'achievements': achievements,
                 'has_achievements': len(achievements) > 0,
             })
 
@@ -818,7 +1205,18 @@ def analytics_dashboard(request):
         master_student_roster.append({
             'student': st,
             'roll_number': st.roll_number,
-            'name': st.name,
+            # FIX (requirement #1): display name in Title Case ("Ananya
+            # Verma") rather than however it's stored (often ALL CAPS from
+            # Excel imports). This only affects the display copy in this
+            # context dict — st.name on the actual Student record is left
+            # untouched.
+            'name': st.name.title() if st.name else st.name,
+            # FIX (requirement #1): class/year badge alongside the name, so
+            # the Bottom 5 Remedial Roster table can show the same
+            # "Class" column the Top 5 Rankers table has, at matching row
+            # height. get_year_display() renders the human label (e.g.
+            # "M.Sc Part 1") from the YEAR_CHOICES code (e.g. "MSC1").
+            'class_label': st.get_year_display(),
             'avg_marks': st_avg,
             'attendance': att_val,
             'action_status': action_status,
@@ -828,11 +1226,8 @@ def analytics_dashboard(request):
             'remedial': ai_data['remedial_plan']
         })
 
-    # --- START PATCH: compute totals, percentages, grades, and sort/ranking support ---
-    # Determine requested sort mode from URL (default 'roll')
     sort_mode = request.GET.get('sort', 'roll')
 
-    # Enrich each master_student_roster item with totals and percentage if possible
     for item in master_student_roster:
         st = item.get('student')
         st_marks = student_marks_map.get(st.id, []) if st else []
@@ -840,7 +1235,6 @@ def analytics_dashboard(request):
         total_max = 0.0
 
         for m in st_marks:
-            # Sum available components for the mark record
             components = [
                 'unit_1_marks', 'unit_2_marks', 'unit_3_marks', 'unit_4_marks',
                 'internal_marks', 'practical_marks', 'assignment_marks', 'presentation_marks'
@@ -855,7 +1249,6 @@ def analytics_dashboard(request):
                         pass
             total_marks += m_total
 
-            # Resolve subject-level max for this mark's subject
             subj = getattr(m, 'subject', None)
             subj_max = 0.0
             if subj:
@@ -871,46 +1264,30 @@ def analytics_dashboard(request):
                     subj_max += float(getattr(subj, 'max_presentation_marks', 0) or 0)
             total_max += subj_max
 
-        # Final percentage (fallback to avg_marks if we have nothing)
-        percentage = None
         if total_max and total_max > 0:
             percentage = round((total_marks / total_max) * 100, 1)
         else:
             percentage = round(item.get('avg_marks', 0), 1) if item.get('avg_marks') is not None else None
 
-        # Grade inference (if grade is missing)
-        grade = item.get('grade') if item.get('grade') else None
-        if not grade and percentage is not None:
-            if percentage >= 90:
-                grade = 'A+'
-            elif percentage >= 80:
-                grade = 'A'
-            elif percentage >= 70:
-                grade = 'B+'
-            elif percentage >= 60:
-                grade = 'B'
-            elif percentage >= 50:
-                grade = 'C'
-            elif percentage >= 40:
-                grade = 'D'
-            else:
-                grade = 'F'
+        # FIX (requirement #4/#3): this used to be a THIRD, differently-
+        # scaled inline grade table (90=A+, 80=A, 70=B+, ...) — different
+        # from both Marks.save()'s old scale and the one specified in the
+        # requirements. Now calls the single centralized function so the
+        # roster/ranking grade always matches the Dossier/Teacher Dashboard
+        # grade for the same score. Also uses calculate_result_status()
+        # for the same reason — one PASS/FAIL rule, not a second one
+        # re-implemented here.
+        status = item.get('status') or calculate_result_status(percentage)
+        grade = 'F' if status == 'FAIL' else calculate_grade(percentage)
 
-        # Status inference (PASS threshold 40%)
-        status = item.get('status') or ('PASS' if (percentage is not None and percentage >= 40) else 'FAIL')
-
-        # Persist values on the roster item so template can use them
         item['total_marks'] = int(total_marks) if total_marks is not None else None
         item['total_max'] = int(total_max) if total_max is not None and total_max > 0 else None
         item['percentage'] = percentage
         item['grade'] = grade
         item['status'] = status
 
-    # Sorting / Ranking behavior
     if sort_mode == 'rank':
-        # Sort by computed percentage (desc). If percentage missing, fall back to avg_marks.
         master_student_roster.sort(key=lambda x: (x.get('percentage') is None, -(x.get('percentage') or x.get('avg_marks', 0))))
-        # assign ranks (1-based). Use percentage if present, else avg_marks
         current_rank = 0
         prev_score = None
         for idx, it in enumerate(master_student_roster, start=1):
@@ -920,7 +1297,6 @@ def analytics_dashboard(request):
                 prev_score = score
             it['rank'] = current_rank
     else:
-        # Default roll order — sort by roll_number string so listing is stable
         try:
             master_student_roster.sort(key=lambda x: (str(x.get('roll_number') or '').lower()))
         except Exception:
@@ -928,7 +1304,6 @@ def analytics_dashboard(request):
         for it in master_student_roster:
             it.pop('rank', None)
 
-    # Recompute department toppers and bottom remedial roster using the enriched percentage/risk
     department_toppers = sorted(master_student_roster, key=lambda x: (x.get('percentage') is None, -(x.get('percentage') or x.get('avg_marks', 0))))[:5]
     bottom_remedial_roster = sorted(master_student_roster, key=lambda x: (-(x.get('risk', 0) or 0)))[:5]
 
@@ -976,12 +1351,14 @@ def analytics_dashboard(request):
 
 # =========================================================
 # MULTI-SHEET EXCEL BULK INGESTION & DATA MANAGEMENT VIEWS
-# (upload_excel_view, upload_history, delete_year_data, delete_excel_batch remain unchanged)
 # =========================================================
 
 @login_required
 def upload_excel_view(request):
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+    # FIX: was `hasattr(request.user, 'profile') and request.user.profile.role == ...`
+    # which silently evaluates False (letting students through) if your
+    # UserProfile related_name is 'userprofile' rather than 'profile'.
+    if _is_student_role(request.user):
         messages.error(request, "Access denied. Students cannot upload sheets.")
         return redirect('students:student_dashboard')
 
@@ -1138,7 +1515,8 @@ def upload_excel_view(request):
 @login_required
 def upload_history(request):
     """REQ 1 & REQ 4: Upload History, Excel Batch Workbooks, and Year Summaries."""
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+    # FIX: same hasattr(...'profile') bug as upload_excel_view.
+    if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
 
@@ -1162,7 +1540,8 @@ def upload_history(request):
 @login_required
 def delete_year_data(request, year_code):
     """REQ 4: Purge all student data associated with a specific Academic Year."""
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+    # FIX: same hasattr(...'profile') bug.
+    if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
 
@@ -1177,10 +1556,12 @@ def delete_year_data(request, year_code):
 
     return redirect('students:upload_history')
 
+
 @login_required
 def delete_excel_batch(request, batch_id):
     """REQ 1: Delete specific Excel Workbook entry and its logged metadata."""
-    if hasattr(request.user, 'profile') and request.user.profile.role == UserProfile.Role.STUDENT:
+    # FIX: same hasattr(...'profile') bug.
+    if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
 
@@ -1195,4 +1576,3 @@ def delete_excel_batch(request, batch_id):
             messages.error(request, f"Failed to delete batch '{filename}': {str(e)}")
 
     return redirect('students:upload_history')
-

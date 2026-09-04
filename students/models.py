@@ -36,12 +36,77 @@ ROLE_CHOICES = [
 
 
 # =========================================================
+# CENTRALIZED GRADE CALCULATION (requirement #3)
+# =========================================================
+def calculate_grade(total_score):
+    """
+    Single source of truth for letter grades across the whole app.
+    Every view, model, serializer, and template filter that needs a grade
+    from a percentage/total-out-of-100 score MUST call this function instead
+    of re-implementing the thresholds inline. Previously there were at least
+    two different scales duplicated across the codebase (one in
+    Marks.save(), a different one inline in analytics_dashboard() in
+    views.py) — that's what this replaces.
+
+    Scale (exact, as specified):
+        90.00 - 100.00  -> 'O'
+        80.00 - 89.99   -> 'A+'
+        70.00 - 79.99   -> 'A'
+        60.00 - 69.99   -> 'B+'
+        55.00 - 59.99   -> 'B'
+        50.00 - 54.99   -> 'C'
+        40.00 - 49.99   -> 'D/P'
+        below 40.00     -> 'F'
+
+    Accepts None safely (returns 'F') so callers don't need to guard against
+    missing scores themselves.
+    """
+    if total_score is None:
+        return 'F'
+    try:
+        score = float(total_score)
+    except (TypeError, ValueError):
+        return 'F'
+
+    if score >= 90:
+        return 'O'
+    elif score >= 80:
+        return 'A+'
+    elif score >= 70:
+        return 'A'
+    elif score >= 60:
+        return 'B+'
+    elif score >= 55:
+        return 'B'
+    elif score >= 50:
+        return 'C'
+    elif score >= 40:
+        return 'D/P'
+    else:
+        return 'F'
+
+
+def calculate_result_status(total_score):
+    """
+    Centralized PASS/FAIL rule (requirement #4): strictly on the total
+    combined score out of 100. No separate per-component pass/fail.
+    """
+    if total_score is None:
+        return 'FAIL'
+    try:
+        score = float(total_score)
+    except (TypeError, ValueError):
+        return 'FAIL'
+    return 'PASS' if score >= 40 else 'FAIL'
+
+
+# =========================================================
 # 1. STUDENT MODEL
 # =========================================================
 class Student(models.Model):
     name = models.CharField(max_length=100, default='Student')
     roll_number = models.CharField(max_length=50, unique=True)
-    
+
     # Independent Programme and Academic Part Tracking
     programme = models.CharField(max_length=20, choices=PROGRAMME_CHOICES, default='BSC')
     part = models.CharField(max_length=10, choices=PART_CHOICES, default='FY')
@@ -60,7 +125,7 @@ class Student(models.Model):
         - Starts with 'TCS'/'TC'/'TYCS'/'T' -> BSc Third Year
         """
         roll = str(self.roll_number).strip().upper()
-        
+
         if roll.startswith('FMCS'):
             self.programme = 'FMCS'
             self.part = 'PART1'
@@ -89,6 +154,20 @@ class Student(models.Model):
 
     def save(self, *args, **kwargs):
         self.auto_assign_year_from_roll()
+
+        # FIX (issue #2 — login/reset bug): normalize roll_number to a
+        # single consistent case so it always matches the User.username the
+        # post_save signal below generates (username = roll_number.lower()).
+        # Previously roll_number was stored in WHATEVER case it was entered
+        # (e.g. "FCS001" from an Excel upload), while the signal always
+        # lowercased it for the username — so a student typing their roll
+        # number in the case printed on their ID card could fail Django's
+        # case-sensitive authenticate() even with the correct password,
+        # and views.py's fallback logic then always reported "Wrong
+        # password" regardless of whether it actually was.
+        if self.roll_number:
+            self.roll_number = str(self.roll_number).strip().upper()
+
         if not self.name or self.name.strip() == '':
             self.name = f"Student {self.roll_number}"
         super().save(*args, **kwargs)
@@ -183,6 +262,15 @@ class Subject(models.Model):
         )
         return sub_total if sub_total > 0 else (self.total_max_marks or 100.0)
 
+    @property
+    def is_practical_only(self):
+        """
+        Used for the Sem Exam 'N/A' display fix (requirement #5): a subject
+        counts as practical-only when it's explicitly typed PRACTICAL, or
+        when it simply has no theory component configured at all.
+        """
+        return (self.subject_type or '').strip().upper() == 'PRACTICAL' or not self.max_theory_marks
+
     def __str__(self):
         return f"{self.name} ({self.subject_type})"
 
@@ -205,6 +293,13 @@ class Marks(models.Model):
     assignment_marks = models.FloatField(null=True, blank=True)
     presentation_marks = models.FloatField(null=True, blank=True)
 
+    # NOTE: stays a nullable FloatField — see semester_exam_display below for
+    # why "N/A" is handled as a display property instead of stored here
+    # (requirement #5). Storing the literal string "N/A" in a FloatField
+    # isn't possible without a schema/migration change and would break every
+    # place that sums this field numerically (calculated totals, dossier
+    # aggregates, etc.) — the display property gives templates a clean,
+    # float-formatting-safe value without touching the schema.
     semester_exam_marks = models.FloatField(null=True, blank=True)
     total_internal_marks = models.FloatField(null=True, blank=True)
     total_marks = models.FloatField(null=True, blank=True)
@@ -223,12 +318,31 @@ class Marks(models.Model):
 
     @property
     def calculated_total(self):
+        """
+        Requirement #4: sum whichever active components exist — internal,
+        assignment, presentation, practical. No per-component pass/fail is
+        computed anywhere; these are combined into one total only.
+        """
         return (
             (self.internal_marks or 0.0) +
             (self.practical_marks or 0.0) +
             (self.assignment_marks or 0.0) +
             (self.presentation_marks or 0.0)
         )
+
+    @property
+    def semester_exam_display(self):
+        """
+        Requirement #5: for a practical-only subject (or one with no theory
+        component configured), the Sem Exam column must show the literal
+        string "N/A" — never 0, 0.0, None, or a dash. Templates should use
+        this property instead of the raw semester_exam_marks field.
+        """
+        if self.subject and self.subject.is_practical_only:
+            return "N/A"
+        if self.semester_exam_marks is None:
+            return "N/A"
+        return self.semester_exam_marks
 
     def save(self, *args, **kwargs):
         def clean_val(val):
@@ -243,49 +357,73 @@ class Marks(models.Model):
         u2 = clean_val(self.unit_2_marks)
         u3 = clean_val(self.unit_3_marks)
         u4 = clean_val(self.unit_4_marks)
-        
+
         p_marks = clean_val(self.practical_marks)
         i_marks = clean_val(self.internal_marks)
         a_marks = clean_val(self.assignment_marks)
         pr_marks = clean_val(self.presentation_marks)
 
+        # Keep these normalized/consistent regardless of subject type —
+        # used by calculated_total() above.
+        self.practical_marks = p_marks
+        self.internal_marks = i_marks
+        self.assignment_marks = a_marks
+        self.presentation_marks = pr_marks
+
         units = {'Unit 1': u1, 'Unit 2': u2, 'Unit 3': u3, 'Unit 4': u4}
         valid_units = {k: v for k, v in units.items() if v is not None}
 
-        if valid_units:
+        is_practical_only = bool(self.subject and self.subject.is_practical_only)
+
+        if is_practical_only:
+            # FIX (requirement #5): store None (not 0.0) for a practical-only
+            # subject's semester exam so semester_exam_display correctly
+            # renders "N/A" instead of a numeric 0.
+            self.semester_exam_marks = None
+            self.weakest_unit = "N/A"
+            self.strongest_unit = "N/A"
+        elif valid_units:
             self.semester_exam_marks = sum(valid_units.values())
             min_score = min(valid_units.values())
             max_score = max(valid_units.values())
             self.weakest_unit = ", ".join([k for k, v in valid_units.items() if v == min_score])
             self.strongest_unit = ", ".join([k for k, v in valid_units.items() if v == max_score])
         else:
+            # Theory subject with no unit marks entered yet — genuinely 0,
+            # not "N/A" (there IS a theory exam, it just hasn't been scored).
             self.semester_exam_marks = 0.0
             self.weakest_unit = "N/A"
             self.strongest_unit = "N/A"
 
         self.total_internal_marks = (i_marks or 0.0) + (a_marks or 0.0) + (pr_marks or 0.0)
+
+        # Requirement #4: total combined score = whichever components exist,
+        # summed. calculated_total covers internal/assignment/presentation/
+        # practical; semester_exam_marks covers the unit-based theory exam
+        # (0 when N/A-practical, since practical subjects have no theory
+        # component to add).
         self.total_marks = self.calculated_total + (self.semester_exam_marks or 0.0)
 
         max_possible = self.subject.computed_total_max if self.subject else 100.0
 
         if max_possible > 0:
             self.percentage = round((self.total_marks / max_possible) * 100, 2)
-
-            if self.percentage >= 85:
-                self.grade, self.result_status = 'O', 'PASS'
-            elif self.percentage >= 75:
-                self.grade, self.result_status = 'A+', 'PASS'
-            elif self.percentage >= 60:
-                self.grade, self.result_status = 'A', 'PASS'
-            elif self.percentage >= 50:
-                self.grade, self.result_status = 'B', 'PASS'
-            elif self.percentage >= 40:
-                self.grade, self.result_status = 'C', 'PASS'
-            else:
-                self.grade, self.result_status = 'F', 'FAIL'
         else:
             self.percentage = 0.0
-            self.grade, self.result_status = 'N/A', 'PENDING'
+
+        # FIX (requirement #3): grade now comes from the single centralized
+        # calculate_grade() function instead of an inline threshold chain
+        # that used a DIFFERENT scale (85/75/60/50/40) than the one
+        # specified. FIX (requirement #4): result status is strictly
+        # PASS/FAIL on the total score via calculate_result_status(), and
+        # a FAIL always shows grade 'F' regardless of what calculate_grade
+        # would otherwise compute from a sub-40 score (they already agree,
+        # but this makes the rule explicit rather than incidental).
+        self.result_status = calculate_result_status(self.percentage)
+        if self.result_status == 'FAIL':
+            self.grade = 'F'
+        else:
+            self.grade = calculate_grade(self.percentage)
 
         super().save(*args, **kwargs)
 
@@ -361,6 +499,11 @@ class UserProfile(models.Model):
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.STUDENT)
+    # NOTE for anyone editing views.py/admin.py: the reverse accessor from a
+    # Student back to this profile is `student.user_account` — NOT
+    # `student.userprofile` and NOT `student.profile`. Getting this wrong
+    # is what silently broke password reset / login lookups for students
+    # (views.py's _get_profile_for_student was fixed to use this).
     student = models.OneToOneField(Student, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_account')
     college_email = models.EmailField(unique=True, null=True, blank=True)
     roll_number = models.CharField(max_length=50, null=True, blank=True)
@@ -395,7 +538,11 @@ class Achievement(models.Model):
 # =========================================================
 class AllowedTeacher(models.Model):
     email = models.EmailField(unique=True)
-    name = models.CharField(max_length=100, blank=True, help_text="e.g. Prof. Alan Turing")
+    # FIX (requirement #6): help_text="e.g. Prof. Alan Turing" removed.
+    # No prefix validation existed on this field before (plain CharField,
+    # blank=True) and none has been added — both "Thomas Edison" and
+    # "Prof. Thomas Edison" were already accepted and still are.
+    name = models.CharField(max_length=100, blank=True)
     is_registered = models.BooleanField(default=False)
 
     def __str__(self):
@@ -458,4 +605,9 @@ class ExcelBatch(models.Model):
 
     def __str__(self):
         return self.filename
-    
+
+
+# NOTE: Student account-provisioning signals (post_save/post_delete) used
+# to live here. They've been moved to students/signals.py, consolidated
+# alongside the AllowedTeacher-deletion signal, so all signal handlers live
+# in one place. See signals.py.

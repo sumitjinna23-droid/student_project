@@ -55,11 +55,15 @@
             border: 1px solid #ccc; 
             border-radius: 4px; 
             font-size: 0.95rem; 
+            background: #fff;
+            color: #222;
         }
+        .form-group input::placeholder { color: transparent; } /* ensure no visible placeholder if present */
         .form-group input:focus {
             outline: none;
             border-color: #007bff;
             box-shadow: 0 0 0 2px rgba(0,123,255,0.15);
+            background: #fff;
         }
         .btn { 
             width: 100%; 
@@ -113,23 +117,25 @@
         </div>
 
         {% if messages %}
-            <div class="messages">
+            <div class="messages" role="alert" aria-live="polite">
                 {% for message in messages %}
                     <p style="margin: 0;">{{ message }}</p>
                 {% endfor %}
             </div>
         {% endif %}
 
-        <form method="POST">
+        <form method="POST" autocomplete="on" novalidate>
             {% csrf_token %}
             
             <div class="form-group">
-                <label for="username">Email / Roll Number</label>
+                <label for="username">Email, Roll Number, or Admin Name</label>
                 <input 
                     type="text" 
                     id="username"
-                    name="username" 
-                    placeholder="teacher@college.edu or FCS2627001" 
+                    name="username"
+                    value=""
+                    autocomplete="username"
+                    aria-label="Email, Roll Number, or Admin Name"
                     required
                 >
             </div>
@@ -139,8 +145,10 @@
                 <input 
                     type="password" 
                     id="password"
-                    name="password" 
-                    placeholder="Leave blank if first-time setup"
+                    name="password"
+                    value=""
+                    autocomplete="current-password"
+                    aria-label="Password"
                 >
             </div>
 
