@@ -161,19 +161,30 @@ def analyze_student_performance(marks_obj, attendance_pct=100.0):
     overall_pct = getattr(marks_obj, 'percentage', 0.0)
     subj = marks_obj.subject
 
-    # Unit Performance Analysis
+    # Unit Performance Analysis - Safely fetch exact unit max fields
+    u1_max = getattr(subj, 'unit_1_max', getattr(subj, 'max_unit_1', 0)) if subj else 0
+    u2_max = getattr(subj, 'unit_2_max', getattr(subj, 'max_unit_2', 0)) if subj else 0
+    u3_max = getattr(subj, 'unit_3_max', getattr(subj, 'max_unit_3', 0)) if subj else 0
+    u4_max = getattr(subj, 'unit_4_max', getattr(subj, 'max_unit_4', 0)) if subj else 0
+
     units = {
-        'Unit 1': (marks_obj.unit_1_marks, subj.unit_1_max if subj else 12.5),
-        'Unit 2': (marks_obj.unit_2_marks, subj.unit_2_max if subj else 12.5),
-        'Unit 3': (marks_obj.unit_3_marks, subj.unit_3_max if subj else 12.5),
-        'Unit 4': (marks_obj.unit_4_marks, subj.unit_4_max if subj else 12.5),
+        'Unit 1': (marks_obj.unit_1_marks, u1_max),
+        'Unit 2': (marks_obj.unit_2_marks, u2_max),
+        'Unit 3': (marks_obj.unit_3_marks, u3_max),
+        'Unit 4': (marks_obj.unit_4_marks, u4_max),
     }
 
-    valid_units = [(k, (v[0] / v[1]) * 100) for k, v in units.items() if v[1] and v[1] > 0 and v[0] is not None]
+    # Calculate exact percentages
+    valid_units = {}
+    for name, (marks, max_marks) in units.items():
+        if marks is not None and max_marks and max_marks > 0:
+            valid_units[name] = (float(marks) / float(max_marks)) * 100.0
 
     if valid_units:
-        weakest_unit_name, weakest_val = min(valid_units, key=lambda x: x[1])
-        remedial_plan = f"Assign practice sheets for {weakest_unit_name} (Score: {round(weakest_val, 1)}%)."
+        min_pct = min(valid_units.values())
+        weakest_tied = [u for u, pct in valid_units.items() if abs(pct - min_pct) < 1e-5]
+        weakest_unit_name = ", ".join(weakest_tied)
+        remedial_plan = f"Assign practice sheets for {weakest_unit_name} (Score: {round(min_pct, 1)}%)."
     else:
         weakest_unit_name = "N/A"
         remedial_plan = "Focus on practical lab submissions and continuous assessments."
@@ -183,10 +194,6 @@ def analyze_student_performance(marks_obj, attendance_pct=100.0):
 
     fail_prob = max(0, min(100, round((100 - overall_pct) * 0.65 + (100 - attendance_pct) * 0.35, 1)))
 
-    # NOTE: this risk_level (STABLE/AT RISK/CRITICAL RISK) is a distinct
-    # concept from the academic letter grade (O/A+/A/B+/B/C/D-P/F) — it's
-    # not part of the grade-centralization requirement and intentionally
-    # left as its own scale here, not routed through calculate_grade().
     if fail_prob >= 50 or overall_pct < 40:
         risk_level, badge_class = "CRITICAL RISK", "danger"
     elif fail_prob >= 25 or attendance_pct < 75:

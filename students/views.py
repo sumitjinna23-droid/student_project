@@ -361,7 +361,23 @@ def custom_login(request):
             messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-        messages.error(request, "Access Denied: No account found for that Email / Roll Number / Admin Name. Contact admin.")
+        # FIX (Admin Login Error Feedback): this fallthrough is reached
+        # whenever the top authenticate() call failed AND the identifier
+        # didn't match a teacher email AND didn't match a student roll
+        # number — i.e. someone attempting an admin/staff login. Previously
+        # this always showed the same generic "No account found" message
+        # even when the admin account DID exist and the person simply typed
+        # the wrong password, which was misleading. Now it distinguishes
+        # the two cases explicitly, checked by username OR email against
+        # any staff/superuser account.
+        admin_user = User.objects.filter(
+            Q(username__iexact=identifier) | Q(email__iexact=identifier)
+        ).filter(Q(is_staff=True) | Q(is_superuser=True)).first()
+
+        if admin_user:
+            messages.error(request, "Wrong password. Please try again.")
+        else:
+            messages.error(request, "Access denied. Admin user not found.")
         return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
     return render(request, 'students/login.html', {'next': next_url} if next_url else {})
@@ -1049,18 +1065,36 @@ def analytics_dashboard(request):
                     pass_count += 1
 
                 unit_scores = {}
-                if getattr(m.subject, 'unit_1_max', getattr(m.subject, 'max_unit_1', 0)) > 0 and m.unit_1_marks is not None:
-                    unit_scores['Unit 1'] = m.unit_1_marks
-                if getattr(m.subject, 'unit_2_max', getattr(m.subject, 'max_unit_2', 0)) > 0 and m.unit_2_marks is not None:
-                    unit_scores['Unit 2'] = m.unit_2_marks
-                if getattr(m.subject, 'unit_3_max', getattr(m.subject, 'max_unit_3', 0)) > 0 and m.unit_3_marks is not None:
-                    unit_scores['Unit 3'] = m.unit_3_marks
-                if getattr(m.subject, 'unit_4_max', getattr(m.subject, 'max_unit_4', 0)) > 0 and m.unit_4_marks is not None:
-                    unit_scores['Unit 4'] = m.unit_4_marks
 
-                m.strongest_unit = max(unit_scores, key=unit_scores.get) if unit_scores else "N/A"
-                m.weakest_unit = min(unit_scores, key=unit_scores.get) if unit_scores else "N/A"
+                # Safely resolve max marks for each unit
+                u1_max = getattr(m.subject, 'unit_1_max', getattr(m.subject, 'max_unit_1', 0))
+                u2_max = getattr(m.subject, 'unit_2_max', getattr(m.subject, 'max_unit_2', 0))
+                u3_max = getattr(m.subject, 'unit_3_max', getattr(m.subject, 'max_unit_3', 0))
+                u4_max = getattr(m.subject, 'unit_4_max', getattr(m.subject, 'max_unit_4', 0))
 
+                if u1_max > 0 and m.unit_1_marks is not None:
+                    unit_scores['Unit 1'] = (float(m.unit_1_marks) / float(u1_max)) * 100.0
+
+                if u2_max > 0 and m.unit_2_marks is not None:
+                    unit_scores['Unit 2'] = (float(m.unit_2_marks) / float(u2_max)) * 100.0
+
+                if u3_max > 0 and m.unit_3_marks is not None:
+                    unit_scores['Unit 3'] = (float(m.unit_3_marks) / float(u3_max)) * 100.0
+
+                if u4_max > 0 and m.unit_4_marks is not None:
+                     unit_scores['Unit 4'] = (float(m.unit_4_marks) / float(u4_max)) * 100.0
+
+                if unit_scores:
+                    max_score = max(unit_scores.values())
+                    strongest_tied = [u for u, score in unit_scores.items() if abs(score - max_score) < 1e-5]
+                    m.strongest_unit = ", ".join(strongest_tied)
+
+                    min_score = min(unit_scores.values())
+                    weakest_tied = [u for u, score in unit_scores.items() if abs(score - min_score) < 1e-5]
+                    m.weakest_unit = ", ".join(weakest_tied)
+                else:
+                     m.strongest_unit = "N/A"
+                     m.weakest_unit = "N/A"
                 ai_analysis = analyze_student_performance(m, overall_att)
 
                 subject_performances.append({

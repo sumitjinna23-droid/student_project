@@ -28,7 +28,6 @@ DEBUG = True
 # For local-network testing only. In production set explicit hostnames.
 ALLOWED_HOSTS = ['*']
 
-
 # Application definition
 
 INSTALLED_APPS = [

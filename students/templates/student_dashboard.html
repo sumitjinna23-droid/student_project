@@ -187,9 +187,9 @@
                 Welcome, 
                 <strong>
                     {% if student.name %}
-                        {{ student.name }}
+                        {{ student.name|title }}
                     {% elif request.user.get_full_name %}
-                        {{ request.user.get_full_name }}
+                        {{ request.user.get_full_name|title }}
                     {% else %}
                         {{ request.user.username }}
                     {% endif %}
@@ -268,7 +268,7 @@
                 {% for item in subject_performances %}
                 <tr>
                     <td><strong>{{ item.subject }}</strong></td>
-                    <td style="color: #38bdf8;">{{ item.marks.semester_exam_marks|default:"N/A" }}</td>
+                    <td style="color: #38bdf8;">{{ item.marks.semester_exam_display }}</td>
                     <td>{{ item.marks.total_marks|default:0 }}/{{ item.marks.subject.computed_total_max|default:100|stringformat:".0f" }}</td>
                     <td style="color: #38bdf8; font-weight: bold;">{{ item.percentage|default:0 }}%</td>
                     <td><span class="badge" style="background-color: #1e3a8a; color: #93c5fd;">{{ item.marks.grade|default:"N/A" }}</span></td>
@@ -288,42 +288,140 @@
         </table>
     </div>
 
-    <!-- 2. Detailed Assessment Component Breakdown -->
-    <div class="card">
-        <h3 style="color: #38bdf8; margin-top: 0;">⚙️ Detailed Assessment Component Breakdown</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Subject</th>
-                    <th>Unit 1</th>
-                    <th>Unit 2</th>
-                    <th>Unit 3</th>
-                    <th>Unit 4</th>
-                    <th>Internal</th>
-                    <th>Assignment</th>
-                    <th>Presentation</th>
-                    <th>Practical</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in subject_performances %}
-                <tr>
-                    <td><strong>{{ item.subject }}</strong></td>
-                    <td>{{ item.marks.unit_1_marks|default:"N/A" }}</td>
-                    <td>{{ item.marks.unit_2_marks|default:"N/A" }}</td>
-                    <td>{{ item.marks.unit_3_marks|default:"N/A" }}</td>
-                    <td>{{ item.marks.unit_4_marks|default:"N/A" }}</td>
-                    <td style="color: #38bdf8;">{{ item.marks.internal_marks|default:"N/A" }}</td>
-                    <td style="color: #38bdf8;">{{ item.marks.assignment_marks|default:"N/A" }}</td>
-                    <td>{{ item.marks.presentation_marks|default:"N/A" }}</td>
-                    <td style="color: #34d399;">{{ item.marks.practical_marks|default:"N/A" }}</td>
-                </tr>
-                {% empty %}
-                <tr><td colspan="9" style="text-align: center; padding: 20px;">No evaluation components recorded.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+<!-- 2. Detailed Assessment Component Breakdown -->
+<div class="card">
+    <h3 style="color: #38bdf8; margin-top: 0;">⚙️ Detailed Assessment Component Breakdown</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Subject</th>
+                <th>Unit 1</th>
+                <th>Unit 2</th>
+                <th>Unit 3</th>
+                <th>Unit 4</th>
+                <th>Internal</th>
+                <th>Assignment</th>
+                <th>Presentation</th>
+                <th>Practical</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in subject_performances %}
+            <tr>
+                <td><strong>{{ item.subject }}</strong></td>
+
+                <!-- FIX (Student Dashboard N/A Display Bug): previously each
+                     cell only checked `is not None`, so a subject with
+                     max_theory_marks == 0 (practical-only) but a stray 0.0
+                     stored in unit_1_marks (e.g. from an Excel import that
+                     wrote a literal 0 instead of leaving the cell blank)
+                     rendered "0.0" instead of "N/A". Now gated on the
+                     subject's relevant max field too — matching the teacher
+                     dashboard's identical logic in dashboard.html — so:
+                       - max == 0 (component doesn't apply to this subject)
+                         OR the value itself is None  -> "N/A"
+                       - a genuine recorded zero (max > 0, value == 0)
+                         -> literal "0" (not "0.0")
+                       - otherwise -> the real value
+                     No views.py changes were needed for this: item.marks.subject
+                     (and its max_theory_marks/max_internal_marks/etc. fields)
+                     were already reachable in this template via the existing
+                     'marks' object's subject foreign key. -->
+
+                <!-- Unit 1 -->
+                <td>
+                    {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_1_marks is None %}
+                        N/A
+                    {% elif item.marks.unit_1_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.unit_1_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Unit 2 -->
+                <td>
+                    {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_2_marks is None %}
+                        N/A
+                    {% elif item.marks.unit_2_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.unit_2_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Unit 3 -->
+                <td>
+                    {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_3_marks is None %}
+                        N/A
+                    {% elif item.marks.unit_3_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.unit_3_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Unit 4 -->
+                <td>
+                    {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_4_marks is None %}
+                        N/A
+                    {% elif item.marks.unit_4_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.unit_4_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Internal -->
+                <td style="color: #38bdf8;">
+                    {% if item.marks.subject.max_internal_marks|default:0 == 0 or item.marks.internal_marks is None %}
+                        N/A
+                    {% elif item.marks.internal_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.internal_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Assignment -->
+                <td style="color: #38bdf8;">
+                    {% if item.marks.subject.max_assignment_marks|default:0 == 0 or item.marks.assignment_marks is None %}
+                        N/A
+                    {% elif item.marks.assignment_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.assignment_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Presentation -->
+                <td>
+                    {% if item.marks.subject.max_presentation_marks|default:0 == 0 or item.marks.presentation_marks is None %}
+                        N/A
+                    {% elif item.marks.presentation_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.presentation_marks }}
+                    {% endif %}
+                </td>
+
+                <!-- Practical -->
+                <td style="color: #34d399;">
+                    {% if item.marks.subject.max_practical_marks|default:0 == 0 or item.marks.practical_marks is None %}
+                        N/A
+                    {% elif item.marks.practical_marks == 0 %}
+                        0
+                    {% else %}
+                        {{ item.marks.practical_marks }}
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="9" style="text-align: center; padding: 20px;">No evaluation components recorded.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 
     <!-- 3. Subject-Wise Attendance Breakdown -->
     <div class="card">
