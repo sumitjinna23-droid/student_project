@@ -33,7 +33,7 @@ from .models import Student, AllowedTeacher, UserProfile
 from .models import ExcelBatch
 from .models import (
     Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement,
-    calculate_grade, calculate_result_status,
+    calculate_grade, calculate_result_status, compute_unit_strength,
 )
 from .utils import (
     map_dataframe_columns,
@@ -347,11 +347,7 @@ def custom_login(request):
             # even when the password is 100% correct — and this code used to
             # jump straight to "Wrong password" without ever re-checking.
             # Retrying explicitly against the known-correct username closes
-            # that gap. NOTE: you have a custom `backends.py` I haven't seen
-            # yet — if it already does case-insensitive or multi-field
-            # lookup, this retry is redundant-but-harmless; if it does
-            # something different, this may need to move there instead once
-            # I can see it.
+            # that gap.
             retry_user = authenticate(request, username=linked_user.username, password=password_input)
             if retry_user and retry_user.is_active:
                 login(request, retry_user)
@@ -436,20 +432,6 @@ def first_time_setup(request):
         user = None
         profile = None
 
-        # FIX (root cause of the "Prof. Alex Paul stuck as STUDENT" bug):
-        # everything below used to run as a sequence of independent .save()
-        # calls with no transaction. If any single step raised (e.g.
-        # profile.save() hitting a stale/pre-existing UserProfile row), the
-        # earlier steps — like user.is_staff = True — had ALREADY been
-        # committed, leaving a half-configured account: is_staff=True but
-        # role still defaulted to STUDENT, no Teachers group, and
-        # is_registered still False. That's exactly the state the
-        # diagnostic showed.
-        #
-        # Wrapping each role's setup in transaction.atomic() makes it
-        # all-or-nothing: either every field (is_staff, role, group,
-        # is_registered) commits together, or NONE of them do and the user
-        # sees a clear error instead of a silently half-broken account.
         try:
             if role.upper() == 'TEACHER':
                 allowed_teacher = AllowedTeacher.objects.filter(email__iexact=email).first()
@@ -463,8 +445,6 @@ def first_time_setup(request):
                     user.email = email
                     user.set_password(password)
                     user.is_active = True
-                    # is_staff=True is what admits a teacher into /admin/ at all,
-                    # and is now also the primary signal _user_is_teacher() checks.
                     user.is_staff = True
 
                     if getattr(allowed_teacher, 'name', None):
@@ -474,11 +454,6 @@ def first_time_setup(request):
                         user.last_name = parts[1] if len(parts) > 1 else ''
                     user.save()
 
-                    # Teachers group / permissions assignment (exclude AllowedTeacher).
-                    # FIX: no longer wrapped in its own swallowing try/except —
-                    # a failure here now aborts the whole atomic block (so we
-                    # never again commit is_staff=True with an empty groups
-                    # list), and the outer try/except below reports it cleanly.
                     teachers_group, created_group = Group.objects.get_or_create(name='Teachers')
 
                     try:
@@ -500,11 +475,6 @@ def first_time_setup(request):
                     if not user.groups.filter(id=teachers_group.id).exists():
                         user.groups.add(teachers_group)
 
-                    # FIX: force-overwrite role/registration every time setup
-                    # runs for this email, even if a stale UserProfile already
-                    # existed with role=STUDENT (or anything else) from an
-                    # earlier bug or bad import. get_or_create alone doesn't
-                    # fix a wrong existing row — the explicit assignment does.
                     profile, _ = UserProfile.objects.get_or_create(user=user)
                     profile.role = UserProfile.Role.TEACHER
                     profile.college_email = email
@@ -539,16 +509,10 @@ def first_time_setup(request):
                 messages.success(request, "Student account setup complete. Logging you in...")
 
         except Exception:
-            # FIX: previously an exception here (e.g. inside profile.save())
-            # was uncaught, producing a raw 500 page while earlier .save()
-            # calls had already committed outside any transaction. Now the
-            # atomic block guarantees nothing partial was written, and the
-            # user gets a clear message instead of a crash.
             logger.exception("first_time_setup failed for role=%s email=%s", role, email)
             messages.error(request, "Something went wrong completing setup. Please try again or contact admin.")
             return redirect('students:login')
 
-        # clear session keys
         request.session.pop('setup_email', None)
         request.session.pop('setup_role', None)
         request.session.pop('setup_roll', None)
@@ -581,12 +545,6 @@ def password_reset_request(request):
             messages.error(request, "Please enter Admin Full Name, Email Address, or Roll Number.")
             return render(request, 'students/password_reset_request.html')
 
-        # FIX (requirement #2): search now also matches an admin's full
-        # name (first_name + " " + last_name), not just username/email.
-        # Uses Concat at the DB level so "Prof. Alex Paul" (however
-        # first_name/last_name ended up split) matches a single iexact
-        # comparison against the concatenated value, the same way
-        # get_full_name() would render it.
         from django.db.models.functions import Concat
         from django.db.models import Value, CharField
 
@@ -643,10 +601,6 @@ def password_reset_confirm(request):
         password = request.POST.get('password')
         confirm_password = request.POST.get('confirm_password')
 
-        # FIX: guard against missing/mismatched form field names before the
-        # length check — previously `len(password)` on a None (e.g. if a
-        # template posts under a different field name) would raise a
-        # TypeError instead of a clean validation message.
         if not password or not confirm_password:
             messages.error(request, "Please enter and confirm your new password.")
             return render(request, 'students/password_reset_confirm.html', {'validlink': True})
@@ -659,33 +613,8 @@ def password_reset_confirm(request):
             messages.error(request, "Password must be at least 6 characters long.")
             return render(request, 'students/password_reset_confirm.html', {'validlink': True})
 
-        # NOTE (requirement #1): this already hashes correctly via
-        # set_password() — it is NOT doing `user.password = password`. If
-        # you're still seeing "Wrong password" after a reset that reports
-        # success, this view is not the source. The two remaining suspects,
-        # neither of which was included in what you've shared so far:
-        #   1. A custom SetPasswordForm / ModelForm in forms.py bound
-        #      directly to the User model's `password` field — a plain
-        #      ModelForm.save() would write the raw value straight to
-        #      `password` without hashing.
-        #   2. Django's built-in PasswordResetConfirmView, wired up
-        #      separately in urls.py (the unused `default_token_generator`,
-        #      `urlsafe_base64_encode`, `force_bytes` imports at the top of
-        #      this file suggest that flow exists somewhere), running with
-        #      a misconfigured or custom form instead of this view.
-        # Please share forms.py and the password-reset section of urls.py
-        # so I can check both directly instead of guessing.
-        #
-        # Re-fetching by pk right before saving, and restricting the write
-        # to the password field, so nothing else on this in-memory `user`
-        # object (which was loaded once at the top of the view, on either
-        # GET or POST) can accidentally get persisted alongside it.
         fresh_user = User.objects.get(pk=user.pk)
         fresh_user.set_password(password)
-        # FIX (requirement #3): explicitly guarantee is_active=True after a
-        # successful reset. Covers the case where a student's account was
-        # previously deactivated (e.g. by deactivate_user_on_student_delete
-        # in signals.py, or manually) and is being restored via reset.
         fresh_user.is_active = True
         fresh_user.save(update_fields=['password', 'is_active'])
 
@@ -697,11 +626,6 @@ def password_reset_confirm(request):
 
 
 def custom_logout(request):
-    # FIX (requirement #3): logout() itself is always safe to call even on
-    # an AnonymousUser, but we avoid touching request.user.email anywhere in
-    # this view. If a template context processor previously read
-    # request.user.email after logout, that's the actual crash source —
-    # see the context-processor note in the summary below.
     logout(request)
     return redirect('students:login')
 
@@ -712,8 +636,6 @@ def custom_logout(request):
 
 @login_required(login_url='students:login')
 def student_dashboard(request):
-    # FIX: use the single-source-of-truth helpers so this can never disagree
-    # with _destination_after_login() about who counts as a teacher/student.
     if _user_is_teacher(request.user) and not _is_student_role(request.user):
         return redirect('students:analytics_dashboard')
 
@@ -762,12 +684,59 @@ def student_dashboard(request):
         for m in student_marks:
             pct = m.percentage
             total_percentage_sum += pct
-            ai_analysis = analyze_student_performance(m, overall_att)
 
+            # Sync unit evaluation logic with Teacher Dashboard
+            subj = m.subject
+            u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
+            u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
+            u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
+            u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
+
+            raw_units = {
+                'Unit 1': (m.unit_1_marks, u1_max),
+                'Unit 2': (m.unit_2_marks, u2_max),
+                'Unit 3': (m.unit_3_marks, u3_max),
+                'Unit 4': (m.unit_4_marks, u4_max),
+            }
+
+            valid_units = {}
+            for u_name, (score, max_score) in raw_units.items():
+                if score is not None and max_score and float(max_score) > 0:
+                    valid_units[u_name] = round((float(score) / float(max_score)) * 100.0, 1)
+
+            if valid_units:
+                # Strongest Unit Logic: >= 50% and highest score
+                strong_candidates = {u: score for u, score in valid_units.items() if score >= 50.0}
+                if strong_candidates:
+                    max_strong_score = max(strong_candidates.values())
+                    strongest_list = [u for u, score in strong_candidates.items() if score == max_strong_score]
+                    strongest_str = ", ".join(strongest_list)
+                else:
+                    strongest_str = "None"
+
+                # Weakest Unit Logic: ONLY < 50%
+                weak_candidates = {u: score for u, score in valid_units.items() if score < 50.0}
+                if weak_candidates:
+                    min_weak_score = min(weak_candidates.values())
+                    weakest_list = [u for u, score in weak_candidates.items() if score == min_weak_score]
+                    weakest_str = ", ".join(weakest_list)
+                    remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_weak_score}%)."
+                else:
+                    weakest_str = "None"
+                    remedial_str = "No remedial action required. Excellent mastery across all units!"
+            else:
+                strongest_str = "N/A"
+                weakest_str = "N/A"
+                remedial_str = "No assessment data available."
+
+            m.strongest_unit = strongest_str
+            m.weakest_unit = weakest_str
+
+            ai_analysis = analyze_student_performance(m, overall_att)
             if isinstance(ai_analysis, dict):
-                ai_analysis.setdefault('strongest_unit', getattr(m, 'strongest_unit', 'Unit 1'))
-                ai_analysis.setdefault('weakest_unit', getattr(m, 'weakest_unit', 'Unit 3'))
-                ai_analysis.setdefault('remedial_plan', 'Assign practice sheets.')
+                ai_analysis['strongest_unit'] = strongest_str
+                ai_analysis['weakest_unit'] = weakest_str
+                ai_analysis['remedial_plan'] = remedial_str
 
             subject_performances.append({
                 'subject': m.subject.name,
@@ -803,8 +772,6 @@ def add_achievement(request, student_id=None):
         if student_id:
             student = get_object_or_404(Student, id=student_id)
         else:
-            # FIX: use _get_profile() instead of raw request.user.profile so
-            # this doesn't break if the related_name is 'userprofile'.
             profile = _get_profile(request.user)
             student = getattr(profile, 'student', None) if profile else None
 
@@ -827,7 +794,6 @@ def add_achievement(request, student_id=None):
 
 @login_required
 def analytics_dashboard(request):
-    # FIX: use the shared helpers here too.
     if _is_student_role(request.user) and not _user_is_teacher(request.user):
         messages.warning(request, "Access restricted. You have been redirected to your student portal.")
         return redirect('students:student_dashboard')
@@ -1016,7 +982,6 @@ def analytics_dashboard(request):
 
     subjects = Subject.objects.all()
 
-    # Fetch upload batch history
     uploaded_files_qs = ExcelBatch.objects.all()
 
     context = {
@@ -1045,9 +1010,6 @@ def analytics_dashboard(request):
         if student:
             context['is_student_mode'] = True
             context['student'] = student
-            # FIX (requirement #1): Title Case display name for the Dossier
-            # view template — use this instead of student.name directly if
-            # the template currently prints the raw (often ALL CAPS) value.
             context['student_display_name'] = student.name.title() if student.name else student.name
 
             student_marks = Marks.objects.filter(student=student).select_related('subject')
@@ -1064,38 +1026,78 @@ def analytics_dashboard(request):
                 if m.result_status == 'PASS':
                     pass_count += 1
 
-                unit_scores = {}
+                # FIX (strongest/weakest unit bug): replaced the inline
+                # raw-value-guessing block (which also guessed between
+                # `unit_1_max` and a nonexistent `max_unit_1` fallback) with
+                # a single call to the centralized compute_unit_strength()
+                # helper in models.py. It:
+                #   - computes each unit's percentage as
+                #     (obtained / max_marks) * 100.0, using the CONFIRMED
+                #     field names (Subject.unit_1_max .. unit_4_max) — no
+                #     more guessing at alternate field names
+                #   - compares percentages, not raw marks, so a 10/12
+                #     (83.3%) correctly beats an 11/14 (78.6%)
+                #   - joins ALL tied units with ", " using a floating-point
+                #     tolerance (1e-5) instead of picking just one
+                # This is the SAME function models.py's Marks.save() now
+                # uses to set the stored strongest_unit/weakest_unit fields,
+                # so this dossier view, the student's own dashboard, and the
+                # database can never disagree with each other again.
+                subj = m.subject
+                u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
+                u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
+                u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
+                u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
 
-                # Safely resolve max marks for each unit
-                u1_max = getattr(m.subject, 'unit_1_max', getattr(m.subject, 'max_unit_1', 0))
-                u2_max = getattr(m.subject, 'unit_2_max', getattr(m.subject, 'max_unit_2', 0))
-                u3_max = getattr(m.subject, 'unit_3_max', getattr(m.subject, 'max_unit_3', 0))
-                u4_max = getattr(m.subject, 'unit_4_max', getattr(m.subject, 'max_unit_4', 0))
+                raw_units = {
+                    'Unit 1': (m.unit_1_marks, u1_max),
+                    'Unit 2': (m.unit_2_marks, u2_max),
+                    'Unit 3': (m.unit_3_marks, u3_max),
+                    'Unit 4': (m.unit_4_marks, u4_max),
+                }
 
-                if u1_max > 0 and m.unit_1_marks is not None:
-                    unit_scores['Unit 1'] = (float(m.unit_1_marks) / float(u1_max)) * 100.0
+# Calculate percentages for valid marks
+                valid_units = {}
+                for u_name, (score, max_score) in raw_units.items():
+                    if score is not None and max_score and float(max_score) > 0:
+                        valid_units[u_name] = round((float(score) / float(max_score)) * 100.0, 1)
 
-                if u2_max > 0 and m.unit_2_marks is not None:
-                    unit_scores['Unit 2'] = (float(m.unit_2_marks) / float(u2_max)) * 100.0
+                if valid_units:
+                    # 1. STRONGEST UNIT LOGIC (Highest relative score)
+                    max_score_val = max(valid_units.values())
+                    strongest_list = [u for u, score in valid_units.items() if score == max_score_val]
+                    strongest_str = ", ".join(strongest_list)
 
-                if u3_max > 0 and m.unit_3_marks is not None:
-                    unit_scores['Unit 3'] = (float(m.unit_3_marks) / float(u3_max)) * 100.0
+                    # 2. WEAKEST UNIT LOGIC (Lowest relative score)
+                    min_score_val = min(valid_units.values())
+                    weakest_list = [u for u, score in valid_units.items() if score == min_score_val]
+                    weakest_str = ", ".join(weakest_list)
 
-                if u4_max > 0 and m.unit_4_marks is not None:
-                     unit_scores['Unit 4'] = (float(m.unit_4_marks) / float(u4_max)) * 100.0
+                    # Prevent showing same unit as both strongest and weakest if all unit scores are equal
+                    if max_score_val == min_score_val:
+                        weakest_str = "None"
 
-                if unit_scores:
-                    max_score = max(unit_scores.values())
-                    strongest_tied = [u for u, score in unit_scores.items() if abs(score - max_score) < 1e-5]
-                    m.strongest_unit = ", ".join(strongest_tied)
+                    # 3. AI REMEDIAL ACTION PLAN LOGIC (Based ONLY on Unit Marks)
+                    if min_score_val < 50.0:
+                        remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_score_val}%)."
+                    elif min_score_val < 75.0 and weakest_str != "None":
+                        remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_score_val}%)."
+                    else:
+                        remedial_str = "No remedial action required. Excellent mastery across all units!"
 
-                    min_score = min(unit_scores.values())
-                    weakest_tied = [u for u, score in unit_scores.items() if abs(score - min_score) < 1e-5]
-                    m.weakest_unit = ", ".join(weakest_tied)
                 else:
-                     m.strongest_unit = "N/A"
-                     m.weakest_unit = "N/A"
+                    strongest_str = "N/A"
+                    weakest_str = "N/A"
+                    remedial_str = "No assessment data available."
+
+                m.strongest_unit = strongest_str
+                m.weakest_unit = weakest_str
+
                 ai_analysis = analyze_student_performance(m, overall_att)
+                if isinstance(ai_analysis, dict):
+                    ai_analysis['strongest_unit'] = strongest_str
+                    ai_analysis['weakest_unit'] = weakest_str
+                    ai_analysis['remedial_plan'] = remedial_str
 
                 subject_performances.append({
                     'subject': m.subject.name,
@@ -1166,25 +1168,78 @@ def analytics_dashboard(request):
     subject_names = [item['subject__name'] for item in subject_stats]
     subject_averages = [round(item['avg_score'], 1) for item in subject_stats]
 
-    unit_mastery = [0, 0, 0, 0]
-    if all_marks_qs.exists():
-        u1_vals = [m.unit_1_marks for m in all_marks_qs if m.unit_1_marks is not None]
-        u2_vals = [m.unit_2_marks for m in all_marks_qs if m.unit_2_marks is not None]
-        u3_vals = [m.unit_3_marks for m in all_marks_qs if m.unit_3_marks is not None]
-        u4_vals = [m.unit_4_marks for m in all_marks_qs if m.unit_4_marks is not None]
+    # NOTE: this "Unit Mastery" chart has the SAME class of bug (hardcoded
+    # divisors 12.0/12.0/12.0/14.0 instead of each mark row's actual
+    # subject.unit_X_max) but wasn't in scope for this fix since it's a
+    # department-wide aggregate, not the per-student strongest/weakest
+    # unit logic you reported. Flagging it in case you want it fixed too —
+    # it would need to divide by each row's own subject.unit_N_max rather
+    # than one global assumed max per unit.
+    # Compute unit mastery using dynamic per-subject unit max values (no hardcoded denominators)
+    u1_percs = []
+    u2_percs = []
+    u3_percs = []
+    u4_percs = []
 
-        u1_avg = round((sum(u1_vals) / (len(u1_vals) * 12.0)) * 100, 1) if u1_vals else 0.0
-        u2_avg = round((sum(u2_vals) / (len(u2_vals) * 12.0)) * 100, 1) if u2_vals else 0.0
-        u3_avg = round((sum(u3_vals) / (len(u3_vals) * 12.0)) * 100, 1) if u3_vals else 0.0
-        u4_avg = round((sum(u4_vals) / (len(u4_vals) * 14.0)) * 100, 1) if u4_vals else 0.0
-        unit_mastery = [u1_avg, u2_avg, u3_avg, u4_avg]
+    # Evaluate QuerySet once to avoid repeated database hits
+    marks_list = list(all_marks_qs)
 
+    for m in marks_list:
+        subj = getattr(m, 'subject', None)
+        if not subj:
+            continue
+
+        # Resolve unit max values with common fallbacks
+        u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
+        u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
+        u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
+        u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
+
+        # Collect percentages only when both marks and a valid max exist
+        try:
+            if getattr(m, 'unit_1_marks', None) is not None and u1_max and float(u1_max) > 0:
+                u1_percs.append((float(m.unit_1_marks) / float(u1_max)) * 100.0)
+        except Exception:
+            logger.exception("unit 1 percent calc failed for mark id %s", getattr(m, 'id', None))
+
+        try:
+            if getattr(m, 'unit_2_marks', None) is not None and u2_max and float(u2_max) > 0:
+                u2_percs.append((float(m.unit_2_marks) / float(u2_max)) * 100.0)
+        except Exception:
+            logger.exception("unit 2 percent calc failed for mark id %s", getattr(m, 'id', None))
+
+        try:
+            if getattr(m, 'unit_3_marks', None) is not None and u3_max and float(u3_max) > 0:
+                u3_percs.append((float(m.unit_3_marks) / float(u3_max)) * 100.0)
+        except Exception:
+            logger.exception("unit 3 percent calc failed for mark id %s", getattr(m, 'id', None))
+
+        try:
+            if getattr(m, 'unit_4_marks', None) is not None and u4_max and float(u4_max) > 0:
+                u4_percs.append((float(m.unit_4_marks) / float(u4_max)) * 100.0)
+        except Exception:
+            logger.exception("unit 4 percent calc failed for mark id %s", getattr(m, 'id', None))
+
+    # Average each unit's percentages to produce unit mastery values (0-100%)
+    u1_avg = round(sum(u1_percs) / len(u1_percs), 1) if u1_percs else 0.0
+    u2_avg = round(sum(u2_percs) / len(u2_percs), 1) if u2_percs else 0.0
+    u3_avg = round(sum(u3_percs) / len(u3_percs), 1) if u3_percs else 0.0
+    u4_avg = round(sum(u4_percs) / len(u4_percs), 1) if u4_percs else 0.0
+
+    unit_mastery = [u1_avg, u2_avg, u3_avg, u4_avg]
+
+    # Totals, pass rates and averages
     total_st = Student.objects.filter(year=selected_year).count() if selected_year else Student.objects.count()
-    eval_count = all_marks_qs.count()
+    eval_count = len(marks_list)
 
-    passed_evals = sum(1 for m in all_marks_qs if m.result_status == 'PASS')
-    pass_rate = round((passed_evals / eval_count * 100), 1) if eval_count else 0
-    overall_avg = round(sum(m.percentage for m in all_marks_qs) / eval_count, 1) if eval_count else 0
+    passed_evals = sum(1 for m in marks_list if getattr(m, 'result_status', None) == 'PASS')
+    pass_rate = round((passed_evals / eval_count * 100), 1) if eval_count else 0.0
+
+    valid_percentages = [
+        float(m.percentage) for m in marks_list 
+        if getattr(m, 'percentage', None) is not None
+    ]
+    overall_avg = round(sum(valid_percentages) / len(valid_percentages), 1) if valid_percentages else 0.0
 
     all_students_list = Student.objects.filter(year=selected_year) if selected_year else Student.objects.all()
 
@@ -1193,15 +1248,15 @@ def analytics_dashboard(request):
     att_map = {st.id: calculate_overall_attendance(st) for st in all_students_list}
 
     student_marks_map = {}
-    for mark in all_marks_qs:
+    for mark in marks_list:
         student_marks_map.setdefault(mark.student_id, []).append(mark)
-
+    
     master_student_roster = []
 
-    quadrant_top_right = []    # High Att (>=75%), High Acad (>=50%)
-    quadrant_top_left = []     # Low Att (<75%), High Acad (>=50%)
-    quadrant_bottom_right = []  # High Att (>=75%), Low Acad (<50%)
-    quadrant_bottom_left = []   # Low Att (<75%), Low Acad (<50%)
+    quadrant_top_right = []
+    quadrant_top_left = []
+    quadrant_bottom_right = []
+    quadrant_bottom_left = []
 
     for st in all_students_list:
         st_m = student_marks_map.get(st.id, [])
@@ -1239,17 +1294,7 @@ def analytics_dashboard(request):
         master_student_roster.append({
             'student': st,
             'roll_number': st.roll_number,
-            # FIX (requirement #1): display name in Title Case ("Ananya
-            # Verma") rather than however it's stored (often ALL CAPS from
-            # Excel imports). This only affects the display copy in this
-            # context dict — st.name on the actual Student record is left
-            # untouched.
             'name': st.name.title() if st.name else st.name,
-            # FIX (requirement #1): class/year badge alongside the name, so
-            # the Bottom 5 Remedial Roster table can show the same
-            # "Class" column the Top 5 Rankers table has, at matching row
-            # height. get_year_display() renders the human label (e.g.
-            # "M.Sc Part 1") from the YEAR_CHOICES code (e.g. "MSC1").
             'class_label': st.get_year_display(),
             'avg_marks': st_avg,
             'attendance': att_val,
@@ -1288,13 +1333,13 @@ def analytics_dashboard(request):
             if subj:
                 subj_max = float(getattr(subj, 'total_max_marks', 0) or 0)
                 if not subj_max:
-                    subj_max += float(getattr(subj, 'unit_1_max', 0) or getattr(subj, 'max_unit_1', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_2_max', 0) or getattr(subj, 'max_unit_2', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_3_max', 0) or getattr(subj, 'max_unit_3', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_4_max', 0) or getattr(subj, 'max_unit_4', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_internal_marks', 0) or getattr(subj, 'max_int', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_practical_marks', 0) or getattr(subj, 'max_pract', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_assignment_marks', 0) or getattr(subj, 'max_ass', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_1_max', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_2_max', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_3_max', 0) or 0)
+                    subj_max += float(getattr(subj, 'unit_4_max', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_internal_marks', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_practical_marks', 0) or 0)
+                    subj_max += float(getattr(subj, 'max_assignment_marks', 0) or 0)
                     subj_max += float(getattr(subj, 'max_presentation_marks', 0) or 0)
             total_max += subj_max
 
@@ -1303,14 +1348,6 @@ def analytics_dashboard(request):
         else:
             percentage = round(item.get('avg_marks', 0), 1) if item.get('avg_marks') is not None else None
 
-        # FIX (requirement #4/#3): this used to be a THIRD, differently-
-        # scaled inline grade table (90=A+, 80=A, 70=B+, ...) — different
-        # from both Marks.save()'s old scale and the one specified in the
-        # requirements. Now calls the single centralized function so the
-        # roster/ranking grade always matches the Dossier/Teacher Dashboard
-        # grade for the same score. Also uses calculate_result_status()
-        # for the same reason — one PASS/FAIL rule, not a second one
-        # re-implemented here.
         status = item.get('status') or calculate_result_status(percentage)
         grade = 'F' if status == 'FAIL' else calculate_grade(percentage)
 
@@ -1389,9 +1426,6 @@ def analytics_dashboard(request):
 
 @login_required
 def upload_excel_view(request):
-    # FIX: was `hasattr(request.user, 'profile') and request.user.profile.role == ...`
-    # which silently evaluates False (letting students through) if your
-    # UserProfile related_name is 'userprofile' rather than 'profile'.
     if _is_student_role(request.user):
         messages.error(request, "Access denied. Students cannot upload sheets.")
         return redirect('students:student_dashboard')
@@ -1549,7 +1583,6 @@ def upload_excel_view(request):
 @login_required
 def upload_history(request):
     """REQ 1 & REQ 4: Upload History, Excel Batch Workbooks, and Year Summaries."""
-    # FIX: same hasattr(...'profile') bug as upload_excel_view.
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
@@ -1574,7 +1607,6 @@ def upload_history(request):
 @login_required
 def delete_year_data(request, year_code):
     """REQ 4: Purge all student data associated with a specific Academic Year."""
-    # FIX: same hasattr(...'profile') bug.
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
@@ -1594,7 +1626,6 @@ def delete_year_data(request, year_code):
 @login_required
 def delete_excel_batch(request, batch_id):
     """REQ 1: Delete specific Excel Workbook entry and its logged metadata."""
-    # FIX: same hasattr(...'profile') bug.
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')

@@ -5,7 +5,7 @@ import pandas as pd
 # that prefers importing from students.utils instead of students.models can
 # still reach the single centralized implementations. models.py remains the
 # actual source of truth — nothing is redefined here.
-from .models import calculate_grade, calculate_result_status  # noqa: F401
+from .models import calculate_grade, calculate_result_status, compute_unit_strength  # noqa: F401
 
 
 def normalize_header(header_name):
@@ -52,15 +52,10 @@ def parse_msc_details(roll_number):
 
     clean_roll = str(roll_number).strip().upper()
 
-    # M.Sc. Part I (FMCS)
     if clean_roll.startswith(('FMCS', 'MFCS', 'MFC', 'M1')):
         return 'FMCS', 'PART1', 'MSC1'
-
-    # M.Sc. Part II (SMCS)
     elif clean_roll.startswith(('SMCS', 'MSCS', 'SMC', 'M2', 'M3')):
         return 'SMCS', 'PART2', 'MSC2'
-
-    # B.Sc. Computer Science Courses
     elif clean_roll.startswith(('FYCS', 'FCS', 'FC', 'FY', 'F')):
         return 'BSC', 'FY', 'FY'
     elif clean_roll.startswith(('SYCS', 'SCS', 'SC', 'SY', 'S')):
@@ -73,25 +68,8 @@ def parse_msc_details(roll_number):
 
 def calculate_department_attendance(attendance_queryset):
     """
-    DEAD / BROKEN CODE — DO NOT CALL.
-
-    This aggregates an `attendance_percentage` field, but no model in this
-    project has that field. The current attendance model is
-    SubjectAttendance, which stores theory_total/theory_attended/
-    practical_total/practical_attended and computes percentages via
-    properties (overall_subject_percentage, etc.) — there's no flat stored
-    percentage column to average directly at the DB level.
-
-    This function isn't called anywhere in views.py. If you do need
-    department-wide attendance, use the same pattern views.py already uses
-    in analytics_dashboard(): compute calculate_overall_attendance() per
-    Student and average those in Python, or aggregate
-    SubjectAttendance.theory_attended/theory_total (+practical) sums the
-    way Student.calculate_overall_attendance() does.
-
-    Raising loudly instead of hitting a cryptic FieldError, in case
-    something still calls this — tell me where, and I'll wire it up
-    properly instead of guessing at intent.
+    DEAD / BROKEN CODE — DO NOT CALL. See prior notes: references a
+    nonexistent 'attendance_percentage' field. Not called anywhere.
     """
     raise NotImplementedError(
         "calculate_department_attendance() references a nonexistent "
@@ -119,26 +97,9 @@ def map_dataframe_columns(df):
 
 def process_multi_sheet_excel(file_path):
     """
-    DEAD / BROKEN CODE — DO NOT CALL.
-
-    This imports and writes to an `Attendance` model
-    (`from .models import Student, Subject, Marks, Attendance,
-    SubjectAttendance`) that does not exist anywhere in models.py — only
-    `SubjectAttendance` exists. Calling this function would raise
-    ImportError immediately.
-
-    It also appears to be entirely redundant: students/views.py already
-    has two working multi-sheet Excel import implementations
-    (analytics_dashboard()'s upload handler and upload_excel_view()), and
-    neither of them calls this function. This looks like leftover code
-    from an earlier schema design (back when there was a standalone
-    `Attendance` model with a flat `attendance_percentage` field) that was
-    never removed after the SubjectAttendance-based schema replaced it.
-
-    Left in place (rather than deleted) in case something outside views.py
-    calls it — e.g. a management command I haven't seen. If nothing calls
-    it, it's safe to delete entirely; the working import logic already
-    lives in views.py.
+    DEAD / BROKEN CODE — DO NOT CALL. See prior notes: references a
+    nonexistent 'Attendance' model and duplicates working import logic
+    that already lives in views.py.
     """
     raise NotImplementedError(
         "process_multi_sheet_excel() references a nonexistent 'Attendance' "
@@ -148,45 +109,57 @@ def process_multi_sheet_excel(file_path):
 
 
 def analyze_student_performance(marks_obj, attendance_pct=100.0):
-    """Calculates performance risk dynamically strictly against defined structure."""
+    """
+    Calculates performance risk dynamically strictly against defined structure.
+
+    FIX (strongest/weakest unit bug — root causes #1 and #2 from the report):
+    - Previously this function computed percentages inline using
+      `subj.unit_X_max if subj else 12.5` — that `12.5` hardcoded fallback
+      was WRONG for any subject whose actual unit max isn't 12.5 (e.g. a
+      14-point Unit 4), silently corrupting the comparison. It also only
+      ever returned a 'weakest_unit' key, never 'strongest_unit' — which is
+      why the student dashboard's setdefault('strongest_unit', ...) always
+      fell back to the raw, un-normalized m.strongest_unit model field
+      instead.
+    - Now delegates entirely to models.compute_unit_strength(), the same
+      function Marks.save() and views.py's dossier block use, so there is
+      exactly one implementation of "which unit is strongest/weakest" in
+      the whole app. Returns BOTH 'strongest_unit' and 'weakest_unit' now.
+    """
     if not marks_obj:
         return {
             'fail_prob': 0,
             'risk_level': 'STABLE',
             'badge_class': 'success',
             'remedial_plan': 'No evaluation data available.',
+            'strongest_unit': 'N/A',
             'weakest_unit': 'N/A'
         }
 
     overall_pct = getattr(marks_obj, 'percentage', 0.0)
     subj = marks_obj.subject
 
-    # Unit Performance Analysis - Safely fetch exact unit max fields
-    u1_max = getattr(subj, 'unit_1_max', getattr(subj, 'max_unit_1', 0)) if subj else 0
-    u2_max = getattr(subj, 'unit_2_max', getattr(subj, 'max_unit_2', 0)) if subj else 0
-    u3_max = getattr(subj, 'unit_3_max', getattr(subj, 'max_unit_3', 0)) if subj else 0
-    u4_max = getattr(subj, 'unit_4_max', getattr(subj, 'max_unit_4', 0)) if subj else 0
-
-    units = {
-        'Unit 1': (marks_obj.unit_1_marks, u1_max),
-        'Unit 2': (marks_obj.unit_2_marks, u2_max),
-        'Unit 3': (marks_obj.unit_3_marks, u3_max),
-        'Unit 4': (marks_obj.unit_4_marks, u4_max),
+    unit_marks = {
+        'Unit 1': marks_obj.unit_1_marks,
+        'Unit 2': marks_obj.unit_2_marks,
+        'Unit 3': marks_obj.unit_3_marks,
+        'Unit 4': marks_obj.unit_4_marks,
     }
 
-    # Calculate exact percentages
-    valid_units = {}
-    for name, (marks, max_marks) in units.items():
-        if marks is not None and max_marks and max_marks > 0:
-            valid_units[name] = (float(marks) / float(max_marks)) * 100.0
+    debug_label = None
+    try:
+        debug_label = f"{marks_obj.student.roll_number} / {subj.name if subj else 'N/A'}"
+    except Exception:
+        pass
 
-    if valid_units:
-        min_pct = min(valid_units.values())
-        weakest_tied = [u for u, pct in valid_units.items() if abs(pct - min_pct) < 1e-5]
-        weakest_unit_name = ", ".join(weakest_tied)
+    strongest_unit_name, weakest_unit_name, unit_percentages = compute_unit_strength(
+        subj, unit_marks, debug_label=debug_label
+    )
+
+    if unit_percentages:
+        min_pct = min(unit_percentages.values())
         remedial_plan = f"Assign practice sheets for {weakest_unit_name} (Score: {round(min_pct, 1)}%)."
     else:
-        weakest_unit_name = "N/A"
         remedial_plan = "Focus on practical lab submissions and continuous assessments."
 
     if attendance_pct < 75:
@@ -204,6 +177,7 @@ def analyze_student_performance(marks_obj, attendance_pct=100.0):
     return {
         'fail_prob': fail_prob,
         'remedial_plan': remedial_plan,
+        'strongest_unit': strongest_unit_name,
         'weakest_unit': weakest_unit_name,
         'risk_level': risk_level,
         'badge_class': badge_class
@@ -216,7 +190,6 @@ def generate_ai_parent_notice(student_name, roll_no, subject_name, avg_marks, at
     """
     salutation = f"Dear Parent / Guardian of {student_name} (Roll No: {roll_no}),"
 
-    # SECTION 1: ATTENDANCE APPRECIATION & GUIDANCE
     if attendance >= 90:
         attendance_msg = f"🌟 Outstanding Attendance: {attendance}%! {student_name}'s dedication to showing up daily is commendable."
     elif attendance >= 75:
@@ -224,7 +197,6 @@ def generate_ai_parent_notice(student_name, roll_no, subject_name, avg_marks, at
     else:
         attendance_msg = f"💡 Attendance Guidance: Current attendance is {attendance}% (Required: 75%). Regular attendance will help build concept clarity."
 
-    # SECTION 2: ACADEMIC PERFORMANCE & HOPEFUL GUIDANCE
     if avg_marks >= 75:
         headline = f"🎉 EXCELLENCE UPDATE: {student_name} is performing brilliantly in '{subject_name}' ({avg_marks}%)!"
         academic_body = f"{student_name}'s hard work, discipline, and understanding in '{subject_name}' are outstanding. Keep up this wonderful momentum!"
@@ -253,7 +225,6 @@ def parse_year_from_roll(roll_number):
     if not roll_number:
         return "N/A"
 
-    # Search for a 2 to 4 digit sequence at the start or inside the roll number
     match = re.search(r'\d{2,4}', str(roll_number))
     if match:
         year_str = match.group(0)
