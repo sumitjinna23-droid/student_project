@@ -76,6 +76,25 @@
         .better-contrast, .text-muted { color: var(--muted-contrast) !important; }
         .table.table-dark .text-muted { color: var(--muted-contrast) !important; }
         .empty-row { color: var(--muted-contrast) !important; font-weight: 500; }
+        /* Scrollable & compact styling for Action Plan column */
+        .action-plan-cell {
+            max-width: 320px;
+            vertical-align: top !important;
+        }
+        .action-plan-scroll {
+            max-height: 85px;
+            overflow-y: auto;
+            font-size: 0.82rem;
+            line-height: 1.35;
+            padding-right: 4px;
+        }
+        .action-plan-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .action-plan-scroll::-webkit-scrollbar-thumb {
+            background: rgba(245, 158, 11, 0.4);
+            border-radius: 4px;
+        }
 
         /* Segmented toggle control (balanced size) */
         .btn-segment {
@@ -773,7 +792,11 @@
                             <td><span class="badge bg-secondary">{{ bot.student.get_year_display }}</span></td>
                             <td>{{ bot.attendance|default:0 }}%</td>
                             <td><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
-                            <td><small class="text-warning">{{ bot.remedial }}</small></td>
+                            <td class="action-plan-cell">
+                              <div class="action-plan-scroll text-warning">
+                                {{ bot.remedial }}
+                              </div>
+                            </td>
                         </tr>
                         {% empty %}
                         <tr><td colspan="6" class="text-center empty-row py-4">No students currently flagged for remedial risk.</td></tr>

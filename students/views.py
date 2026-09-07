@@ -12,11 +12,6 @@ from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 
 # Auth models & permissions
-# NOTE: Group and Permission were already imported here. If you were seeing
-# "NameError: name 'Group' is not defined", it was coming from a different
-# copy of this file, or from admin.py / middleware (not included in this
-# upload) that reference Group without importing it. Make sure those files
-# have this same import line.
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from django.apps import apps
@@ -28,9 +23,7 @@ from django.db.models import Q as DjangoQ
 import logging
 logger = logging.getLogger(__name__)
 
-from .models import Student, AllowedTeacher, UserProfile
-
-from .models import ExcelBatch
+from .models import Student, AllowedTeacher, UserProfile, ExcelBatch
 from .models import (
     Student, Subject, Marks, SubjectAttendance, YEAR_CHOICES, UserProfile, AllowedTeacher, Achievement,
     calculate_grade, calculate_result_status, compute_unit_strength,
@@ -38,9 +31,191 @@ from .models import (
 from .utils import (
     map_dataframe_columns,
     parse_year_from_roll,
-    analyze_student_performance,
     generate_ai_parent_notice
 )
+
+
+# =========================================================
+# DYNAMIC AI PERFORMANCE ANALYSIS HELPER
+# =========================================================
+
+def analyze_student_performance(marks_obj, overall_att=100.0):
+    """
+    Evaluates student performance across active Unit and Non-Unit components dynamically.
+    Returns a consistent dictionary with AI performance metrics, dynamic dynamic remediation message,
+    and risk indicators usable across all 4 dashboard views.
+    """
+    if not marks_obj:
+        return {
+            'fail_prob': 0,
+            'risk_level': 'STABLE',
+            'badge_class': 'success',
+            'remedial_plan': 'No assessment data available.',
+            'remedial_str': 'No assessment data available.',
+            'strongest_unit': 'N/A',
+            'weakest_unit': 'N/A',
+            'anomaly_detected': False,
+            'anomaly_msg': ''
+        }
+
+    subj = getattr(marks_obj, 'subject', None)
+    
+    # Resolve Max Marks for each component safely
+    u1_max = float(getattr(subj, 'unit_1_max', 0) or getattr(subj, 'max_unit_1', 0) or 0)
+    u2_max = float(getattr(subj, 'unit_2_max', 0) or getattr(subj, 'max_unit_2', 0) or 0)
+    u3_max = float(getattr(subj, 'unit_3_max', 0) or getattr(subj, 'max_unit_3', 0) or 0)
+    u4_max = float(getattr(subj, 'unit_4_max', 0) or getattr(subj, 'max_unit_4', 0) or 0)
+
+    pr_max = float(getattr(subj, 'max_practical_marks', 0) or 0)
+    int_max = float(getattr(subj, 'max_internal_marks', 0) or 0)
+    ass_max = float(getattr(subj, 'max_assignment_marks', 0) or 0)
+    pres_max = float(getattr(subj, 'max_presentation_marks', 0) or 0)
+
+    # Dictionary of all assessment components
+    all_components = {
+        'Unit 1': (marks_obj.unit_1_marks, u1_max, True),
+        'Unit 2': (marks_obj.unit_2_marks, u2_max, True),
+        'Unit 3': (marks_obj.unit_3_marks, u3_max, True),
+        'Unit 4': (marks_obj.unit_4_marks, u4_max, True),
+        'Practical': (marks_obj.practical_marks, pr_max, False),
+        'Internal': (marks_obj.internal_marks, int_max, False),
+        'Assignment': (marks_obj.assignment_marks, ass_max, False),
+        'Presentation': (marks_obj.presentation_marks, pres_max, False),
+    }
+
+    unit_percentages = {}
+    non_unit_percentages = {}
+    critical_components = []
+
+    for comp_name, (score, max_score, is_unit) in all_components.items():
+        if score is not None and max_score > 0:
+            pct = round((float(score) / float(max_score)) * 100.0, 1)
+            if is_unit:
+                unit_percentages[comp_name] = pct
+            else:
+                non_unit_percentages[comp_name] = pct
+            
+            if pct < 40.0:
+                critical_components.append((comp_name, pct))
+
+    # Evaluate Weakest & Strongest Unit Logic
+    weakest_unit_str = "None"
+    strongest_unit_str = "None"
+    min_score_val = None
+
+    if unit_percentages:
+        min_score = min(unit_percentages.values())
+        max_score = max(unit_percentages.values())
+
+        if min_score == max_score and min_score == 100.0:
+            weakest_unit_str = "None"
+            strongest_unit_str = ", ".join([u for u, p in unit_percentages.items()])
+        elif min_score == max_score:
+            weakest_unit_str = "None"
+            strongest_unit_str = ", ".join([u for u, p in unit_percentages.items()])
+        else:
+            weak_units = [u for u, p in unit_percentages.items() if p == min_score]
+            strong_units = [u for u, p in unit_percentages.items() if p == max_score]
+            weakest_unit_str = ", ".join(weak_units)
+            strongest_unit_str = ", ".join(strong_units)
+            min_score_val = min_score
+
+    # Determine Academic Remedial Dynamic String
+    academic_msg = ""
+    
+    # Check perfect mastery condition across all active components
+    all_units_ok = all(p >= 75.0 for p in unit_percentages.values()) if unit_percentages else True
+    all_non_units_ok = all(p >= 75.0 for p in non_unit_percentages.values()) if non_unit_percentages else True
+    perfect_academic_mastery = all_units_ok and all_non_units_ok and (weakest_unit_str == "None")
+
+    if len(critical_components) > 1:
+        # Multiple critical failures (< 40%)
+        names = [comp[0] for comp in critical_components]
+        if len(names) == 2:
+            critical_components_str = " and ".join(names)
+        else:
+            critical_components_str = ", ".join(names[:-1]) + f", and {names[-1]}"
+        academic_msg = f"Your score in {critical_components_str} is currently below 40%. This area needs more attention and support right now. Don’t be discouraged by your current result. Start with the basics, practice step by step, and ask your teacher for help when you need it. With patience and consistent effort, you can improve."
+    
+    elif len(critical_components) == 1 and not critical_components[0][0].startswith("Unit"):
+        # Single Non-Unit component < 40%
+        comp_name, score = critical_components[0]
+        academic_msg = f"Your score in {comp_name} is currently {score}%. This area needs more attention and support right now. Don’t be discouraged by your current result. Start with the basics, practice step by step, and ask your teacher for help when you need it. With patience and consistent effort, you can improve."
+    
+    else:
+        # Check single non-unit components between 40% and 75%
+        weak_non_units = {k: v for k, v in non_unit_percentages.items() if v < 75.0}
+        if weak_non_units:
+            first_comp, score = list(weak_non_units.items())[0]
+            if score < 40.0:
+                academic_msg = f"Your score in {first_comp} is currently {score}%. This area needs more attention and support right now. Don’t be discouraged by your current result. Start with the basics, practice step by step, and ask your teacher for help when you need it. With patience and consistent effort, you can improve."
+            else:
+                academic_msg = f"Your score in {first_comp} is currently {score}%. You are making progress, but this area needs more practice. Keep working on the topics you find difficult and take time to strengthen your understanding. With regular practice and consistent effort, you can continue to improve."
+        elif min_score_val is not None:
+            # Weakest Unit specific guidance
+            if min_score_val < 40.0:
+                academic_msg = f"Your score in {weakest_unit_str} is currently {min_score_val}%. This Unit needs more attention and support right now. Don’t be discouraged. Go back to the basics, take one topic at a time, and practice regularly. Ask your teacher for guidance whenever you need it. With consistent effort, you can strengthen your understanding."
+            elif min_score_val < 75.0:
+                academic_msg = f"Your score in {weakest_unit_str} is currently {min_score_val}%. You are making progress, but this Unit needs some extra practice. Review the topics you find difficult and keep practicing them. Step by step, you can strengthen your understanding and improve your performance."
+            else:
+                academic_msg = f"Excellent work! Your score in {weakest_unit_str} is {min_score_val}%, showing strong performance. This is currently your lowest-scoring Unit, but you are still doing well. Continue refining your understanding and building on what you already know. Keep learning, keep growing, and continue giving your best."
+
+    # Determine Attendance Dynamic String
+    attendance_msg = ""
+    if overall_att < 50.0:
+        attendance_msg = f"Your attendance is currently {overall_att}%, which is below the expected level. Missing many classes can make it difficult to keep up with your studies. Try to attend classes more regularly and speak with your teacher if you are facing difficulties. Your current attendance can improve, and it is not too late to make a better start."
+    elif overall_att < 75.0:
+        attendance_msg = f"Your attendance is currently {overall_att}%. Attending classes more regularly will help you stay on track and avoid missing important lessons. Keep working toward better attendance, because every class you attend gives you another opportunity to learn and grow."
+
+    # Combine Messages
+    if perfect_academic_mastery and overall_att >= 75.0:
+        remedial_str = "Excellent work! Your marks and attendance show consistent effort, commitment, and dedication. Your hard work is clearly reflected in your performance. Keep learning, keep growing, and continue giving your best. You are on a strong path."
+    elif academic_msg and attendance_msg:
+        remedial_str = f"{academic_msg} {attendance_msg}"
+    elif academic_msg:
+        remedial_str = academic_msg
+    elif attendance_msg:
+        remedial_str = attendance_msg
+    else:
+        remedial_str = "Excellent work! Your marks and attendance show consistent effort, commitment, and dedication. Your hard work is clearly reflected in your performance. Keep learning, keep growing, and continue giving your best. You are on a strong path."
+
+    # Risk metrics calculation
+    overall_pct = getattr(marks_obj, 'percentage', 0.0) or 0.0
+    fail_prob = max(0, min(100, int(100 - overall_pct)))
+    
+    if overall_pct < 40 or overall_att < 50:
+        risk_level = 'CRITICAL'
+        badge_class = 'danger'
+    elif overall_pct < 60 or overall_att < 75:
+        risk_level = 'WARNING'
+        badge_class = 'warning'
+    else:
+        risk_level = 'STABLE'
+        badge_class = 'success'
+
+    # Dynamic Anomaly Detection Message Logic
+    anomaly_detected = (overall_att < 75.0 or overall_pct < 50.0)
+    anomaly_msg = ""
+    
+    if anomaly_detected:
+        if overall_att < 75.0 and overall_pct < 50.0:
+            anomaly_msg = "Low academic score and low attendance flag detected."
+        elif overall_att < 75.0:
+            anomaly_msg = "Low attendance flag detected."
+        else:
+            anomaly_msg = "Low academic score flag detected."
+
+    return {
+        'fail_prob': fail_prob,
+        'risk_level': risk_level,
+        'badge_class': badge_class,
+        'remedial_plan': remedial_str,
+        'remedial_str': remedial_str,
+        'strongest_unit': strongest_unit_str,
+        'weakest_unit': weakest_unit_str,
+        'anomaly_detected': anomaly_detected,
+        'anomaly_msg': anomaly_msg
+    }
 
 
 # =========================================================
@@ -61,17 +236,10 @@ def get_user_display_name(user):
         if not user or not getattr(user, 'is_authenticated', False):
             return ''
 
-        # Student name from profile if available
         profile = _get_profile(user)
         if profile and getattr(profile, 'student', None) and getattr(profile.student, 'name', None):
             return profile.student.name
 
-        # AllowedTeacher by email (case-insensitive)
-        # FIX: guard with is_authenticated + truthy email before ever touching
-        # request.user.email — this is what was throwing
-        # "AttributeError: 'AnonymousUser' object has no attribute 'email'"
-        # in other parts of the codebase (middleware/admin). Applying the same
-        # safe pattern here.
         if getattr(user, 'is_authenticated', False) and getattr(user, 'email', None):
             user_email = user.email
             teacher_entry = AllowedTeacher.objects.filter(email__iexact=user_email).first()
@@ -98,13 +266,6 @@ def _get_profile(user):
     Centralized profile lookup so every view resolves the related UserProfile
     the SAME way, regardless of whether your OneToOneField's related_name is
     'userprofile' or 'profile'.
-
-    FIX: Several views previously did `hasattr(request.user, 'profile')` on
-    its own. If your actual related_name is 'userprofile' (as used elsewhere
-    in this file), that check silently evaluates False every time, which
-    breaks role gating (students slipping into teacher-only views, and vice
-    versa) and contributes to the "teacher redirected to student dashboard"
-    symptom. Always route through this helper instead of ad-hoc hasattr checks.
     """
     if not user or not getattr(user, 'is_authenticated', False):
         return None
@@ -154,29 +315,11 @@ def compute_smart_action_status(attendance_pct, academic_avg):
 
 
 def _is_student_role(user):
-    """
-    Explicit, single source of truth for "is this user a STUDENT".
-    Mirrors _user_is_teacher's structure so the two can never silently
-    disagree with each other.
-    """
     profile = _get_profile(user)
     return bool(profile and getattr(profile, 'role', None) == getattr(UserProfile.Role, 'STUDENT', 'STUDENT'))
 
 
 def _user_is_teacher(user):
-    """
-    Helper: returns True only if the user should be treated as a Teacher.
-    Rules (checked in this explicit order):
-      - user must be authenticated
-      - superusers are treated as admins (not 'teacher' for redirect)
-      - explicit profile.role == STUDENT overrides everything (avoids loops)
-      - explicit profile.role == TEACHER -> teacher
-      - is_staff=True -> teacher (FIX: added per requirement #1, so a staff
-        account created without a profile.role or without a Teachers-group
-        membership still routes correctly)
-      - group 'Teachers' -> teacher
-      - AllowedTeacher entry matching email -> teacher
-    """
     try:
         if not user or not getattr(user, 'is_authenticated', False):
             return False
@@ -191,16 +334,12 @@ def _user_is_teacher(user):
         if profile and getattr(profile, 'role', None) == getattr(UserProfile.Role, 'TEACHER', 'TEACHER'):
             return True
 
-        # FIX: explicit is_staff check (requirement #1) as an additional,
-        # independent signal that this account is a teacher/admin account.
         if getattr(user, 'is_staff', False):
             return True
 
         if user.groups.filter(name__iexact='Teachers').exists():
             return True
 
-        # FIX: guarded email access — never touch user.email without first
-        # confirming is_authenticated and that email is set.
         if getattr(user, 'is_authenticated', False) and getattr(user, 'email', None):
             if AllowedTeacher.objects.filter(email__iexact=user.email).exists():
                 return True
@@ -211,46 +350,17 @@ def _user_is_teacher(user):
 
 
 def _destination_after_login(user, next_url=None):
-    """
-    Decide where to redirect after login based on role.
-    - superuser -> /dashboard/ (analytics_dashboard)
-    - teacher/staff -> /dashboard/ (analytics_dashboard)
-    - student -> /student-dashboard/ (student_dashboard)
-    - fallback -> analytics_dashboard
-
-    FIX (requirement #2, this round): superusers logging in via the main
-    /login/ form used to be sent straight to '/admin' unconditionally. Per
-    the new requirement, ALL staff/teacher/superuser logins via /login/ now
-    land on /dashboard/. The Django admin panel at /admin/ is untouched and
-    still reachable directly (and still has its own separate login flow at
-    /admin/login/) — this only changes where /login/ sends a superuser.
-
-    FIX (requirement #1, prior round): teacher/staff check happens via the
-    hardened _user_is_teacher() (which itself checks is_staff, Teachers
-    group, role, and AllowedTeacher) BEFORE the student check, and a
-    `next_url` is only honored if it doesn't contradict the user's role —
-    otherwise an old/stale `next` query param could still bounce a teacher
-    back into the student dashboard.
-    """
     try:
         if not user:
             return 'students:login'
 
-        # Superusers are staff/admin-equivalent for landing-page purposes,
-        # but _user_is_teacher() deliberately returns False for superusers
-        # (see its docstring) so it can't be used to also gate admin-only
-        # views elsewhere. So this check is explicit and separate.
         if getattr(user, 'is_superuser', False) or _user_is_teacher(user):
-            # Teachers/staff must NEVER land on the student dashboard, even
-            # if a stale `next` param points there.
             if next_url and 'student-dashboard' not in next_url and 'student_dashboard' not in next_url:
                 return next_url
             return reverse('students:analytics_dashboard')
 
         if _is_student_role(user):
             if next_url and 'dashboard' in next_url and 'student' not in next_url:
-                # a next_url pointing at the teacher dashboard is not valid
-                # for a student — ignore it and send them to their own page.
                 return reverse('students:student_dashboard')
             return next_url or reverse('students:student_dashboard')
 
@@ -281,7 +391,6 @@ def custom_login(request):
             messages.error(request, "Enter Email, Roll Number, or Admin Name.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-        # Try normal Django auth first
         user = authenticate(request, username=identifier, password=password_input)
         if user:
             if not user.is_active:
@@ -292,7 +401,6 @@ def custom_login(request):
             dest = _destination_after_login(user, next_url=next_url)
             return redirect(dest)
 
-        # Auth failed - teacher path if identifier contains '@'
         if '@' in identifier:
             email = identifier.strip().lower()
             allowed_teacher = AllowedTeacher.objects.filter(email__iexact=email).first()
@@ -316,10 +424,9 @@ def custom_login(request):
                 messages.info(request, "Your account needs setup — continue to set a new password.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
 
-            messages.error(request, "Access Denied: This email is not registered. Contact admin.")
+            messages.error(request, f"Access Denied: The email '{email}' is not registered. Contact admin.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-        # Student path
         roll_test = identifier.split('@')[0]
         student = Student.objects.filter(roll_number__iexact=roll_test).first()
 
@@ -339,15 +446,6 @@ def custom_login(request):
                 messages.info(request, "Student account found — continue to set up your password.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={request.session['setup_email']}&role=STUDENT&roll={student.roll_number}")
 
-            # FIX (issue: "students can't log in even after resetting
-            # password"): the `authenticate()` call at the top of this view
-            # uses whatever case the user typed for `identifier`. If that
-            # doesn't exactly match `linked_user.username` (Django's default
-            # backend does a case-sensitive lookup), authenticate() fails
-            # even when the password is 100% correct — and this code used to
-            # jump straight to "Wrong password" without ever re-checking.
-            # Retrying explicitly against the known-correct username closes
-            # that gap.
             retry_user = authenticate(request, username=linked_user.username, password=password_input)
             if retry_user and retry_user.is_active:
                 login(request, retry_user)
@@ -357,49 +455,35 @@ def custom_login(request):
             messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-        # FIX (Admin Login Error Feedback): this fallthrough is reached
-        # whenever the top authenticate() call failed AND the identifier
-        # didn't match a teacher email AND didn't match a student roll
-        # number — i.e. someone attempting an admin/staff login. Previously
-        # this always showed the same generic "No account found" message
-        # even when the admin account DID exist and the person simply typed
-        # the wrong password, which was misleading. Now it distinguishes
-        # the two cases explicitly, checked by username OR email against
-        # any staff/superuser account.
-        admin_user = User.objects.filter(
+        # Check if the identifier matches an existing user (Admin, Staff, or Teacher)
+        matched_user = User.objects.filter(
             Q(username__iexact=identifier) | Q(email__iexact=identifier)
-        ).filter(Q(is_staff=True) | Q(is_superuser=True)).first()
+        ).first()
 
-        if admin_user:
+        # Check if input contains digits (typical format for Student Roll Numbers)
+        is_roll_number = any(char.isdigit() for char in identifier)
+
+        if matched_user:
             messages.error(request, "Wrong password. Please try again.")
+        elif '@' in identifier:
+            messages.error(request, f"Access denied. User email '{identifier}' not found.")
+        elif is_roll_number:
+            messages.error(request, f"No student record found for Roll Number '{identifier}'. Please check the roll number or contact an administrator.")
         else:
-            messages.error(request, "Access denied. Admin user not found.")
+            messages.error(request, f"Access denied. Admin user '{identifier}' not found.")
+
         return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
     return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
 
 def _get_profile_for_student(student):
-    """
-    FIX: the correct reverse accessor from a Student to its UserProfile is
-    `student.user_account` — that's the related_name on
-    UserProfile.student in models.py. The previous version of this helper
-    tried `student.userprofile` / `student.profile`, neither of which
-    exist, so it ALWAYS returned None. That silently broke both
-    custom_login's student path and password_reset_request's student
-    lookup, forcing them into less-reliable fallback branches every time.
-    """
     if not student:
         return None
     return getattr(student, 'user_account', None)
 
 
 def first_time_setup(request):
-    """
-    First-time password creation screen.
-    Creates/updates User; assigns Teachers group (excluding AllowedTeacher perms);
-    authenticates and logs the user in.
-    """
     email = request.session.get('setup_email')
     role = request.session.get('setup_role')
     roll_number = request.session.get('setup_roll')
@@ -537,7 +621,6 @@ def first_time_setup(request):
     return render(request, 'first_time_setup.html', {'email': email, 'role': role, 'roll': roll_number})
 
 
-# Password reset & related helpers
 def password_reset_request(request):
     if request.method == "POST":
         input_value = request.POST.get('username_or_email', '').strip()
@@ -685,58 +768,9 @@ def student_dashboard(request):
             pct = m.percentage
             total_percentage_sum += pct
 
-            # Sync unit evaluation logic with Teacher Dashboard
-            subj = m.subject
-            u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
-            u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
-            u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
-            u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
-
-            raw_units = {
-                'Unit 1': (m.unit_1_marks, u1_max),
-                'Unit 2': (m.unit_2_marks, u2_max),
-                'Unit 3': (m.unit_3_marks, u3_max),
-                'Unit 4': (m.unit_4_marks, u4_max),
-            }
-
-            valid_units = {}
-            for u_name, (score, max_score) in raw_units.items():
-                if score is not None and max_score and float(max_score) > 0:
-                    valid_units[u_name] = round((float(score) / float(max_score)) * 100.0, 1)
-
-            if valid_units:
-                # Strongest Unit Logic: >= 50% and highest score
-                strong_candidates = {u: score for u, score in valid_units.items() if score >= 50.0}
-                if strong_candidates:
-                    max_strong_score = max(strong_candidates.values())
-                    strongest_list = [u for u, score in strong_candidates.items() if score == max_strong_score]
-                    strongest_str = ", ".join(strongest_list)
-                else:
-                    strongest_str = "None"
-
-                # Weakest Unit Logic: ONLY < 50%
-                weak_candidates = {u: score for u, score in valid_units.items() if score < 50.0}
-                if weak_candidates:
-                    min_weak_score = min(weak_candidates.values())
-                    weakest_list = [u for u, score in weak_candidates.items() if score == min_weak_score]
-                    weakest_str = ", ".join(weakest_list)
-                    remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_weak_score}%)."
-                else:
-                    weakest_str = "None"
-                    remedial_str = "No remedial action required. Excellent mastery across all units!"
-            else:
-                strongest_str = "N/A"
-                weakest_str = "N/A"
-                remedial_str = "No assessment data available."
-
-            m.strongest_unit = strongest_str
-            m.weakest_unit = weakest_str
-
             ai_analysis = analyze_student_performance(m, overall_att)
-            if isinstance(ai_analysis, dict):
-                ai_analysis['strongest_unit'] = strongest_str
-                ai_analysis['weakest_unit'] = weakest_str
-                ai_analysis['remedial_plan'] = remedial_str
+            m.strongest_unit = ai_analysis.get('strongest_unit', 'N/A')
+            m.weakest_unit = ai_analysis.get('weakest_unit', 'N/A')
 
             subject_performances.append({
                 'subject': m.subject.name,
@@ -1007,6 +1041,9 @@ def analytics_dashboard(request):
                 Q(roll_number__iexact=search_query) | Q(name__icontains=search_query)
             ).first()
 
+        if not student and search_query:
+            messages.error(request, f"No student found with Roll Number or Name matching '{search_query}'.")
+
         if student:
             context['is_student_mode'] = True
             context['student'] = student
@@ -1026,78 +1063,9 @@ def analytics_dashboard(request):
                 if m.result_status == 'PASS':
                     pass_count += 1
 
-                # FIX (strongest/weakest unit bug): replaced the inline
-                # raw-value-guessing block (which also guessed between
-                # `unit_1_max` and a nonexistent `max_unit_1` fallback) with
-                # a single call to the centralized compute_unit_strength()
-                # helper in models.py. It:
-                #   - computes each unit's percentage as
-                #     (obtained / max_marks) * 100.0, using the CONFIRMED
-                #     field names (Subject.unit_1_max .. unit_4_max) — no
-                #     more guessing at alternate field names
-                #   - compares percentages, not raw marks, so a 10/12
-                #     (83.3%) correctly beats an 11/14 (78.6%)
-                #   - joins ALL tied units with ", " using a floating-point
-                #     tolerance (1e-5) instead of picking just one
-                # This is the SAME function models.py's Marks.save() now
-                # uses to set the stored strongest_unit/weakest_unit fields,
-                # so this dossier view, the student's own dashboard, and the
-                # database can never disagree with each other again.
-                subj = m.subject
-                u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
-                u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
-                u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
-                u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
-
-                raw_units = {
-                    'Unit 1': (m.unit_1_marks, u1_max),
-                    'Unit 2': (m.unit_2_marks, u2_max),
-                    'Unit 3': (m.unit_3_marks, u3_max),
-                    'Unit 4': (m.unit_4_marks, u4_max),
-                }
-
-# Calculate percentages for valid marks
-                valid_units = {}
-                for u_name, (score, max_score) in raw_units.items():
-                    if score is not None and max_score and float(max_score) > 0:
-                        valid_units[u_name] = round((float(score) / float(max_score)) * 100.0, 1)
-
-                if valid_units:
-                    # 1. STRONGEST UNIT LOGIC (Highest relative score)
-                    max_score_val = max(valid_units.values())
-                    strongest_list = [u for u, score in valid_units.items() if score == max_score_val]
-                    strongest_str = ", ".join(strongest_list)
-
-                    # 2. WEAKEST UNIT LOGIC (Lowest relative score)
-                    min_score_val = min(valid_units.values())
-                    weakest_list = [u for u, score in valid_units.items() if score == min_score_val]
-                    weakest_str = ", ".join(weakest_list)
-
-                    # Prevent showing same unit as both strongest and weakest if all unit scores are equal
-                    if max_score_val == min_score_val:
-                        weakest_str = "None"
-
-                    # 3. AI REMEDIAL ACTION PLAN LOGIC (Based ONLY on Unit Marks)
-                    if min_score_val < 50.0:
-                        remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_score_val}%)."
-                    elif min_score_val < 75.0 and weakest_str != "None":
-                        remedial_str = f"Assign practice sheets for {weakest_str} (Score: {min_score_val}%)."
-                    else:
-                        remedial_str = "No remedial action required. Excellent mastery across all units!"
-
-                else:
-                    strongest_str = "N/A"
-                    weakest_str = "N/A"
-                    remedial_str = "No assessment data available."
-
-                m.strongest_unit = strongest_str
-                m.weakest_unit = weakest_str
-
                 ai_analysis = analyze_student_performance(m, overall_att)
-                if isinstance(ai_analysis, dict):
-                    ai_analysis['strongest_unit'] = strongest_str
-                    ai_analysis['weakest_unit'] = weakest_str
-                    ai_analysis['remedial_plan'] = remedial_str
+                m.strongest_unit = ai_analysis.get('strongest_unit', 'N/A')
+                m.weakest_unit = ai_analysis.get('weakest_unit', 'N/A')
 
                 subject_performances.append({
                     'subject': m.subject.name,
@@ -1168,20 +1136,11 @@ def analytics_dashboard(request):
     subject_names = [item['subject__name'] for item in subject_stats]
     subject_averages = [round(item['avg_score'], 1) for item in subject_stats]
 
-    # NOTE: this "Unit Mastery" chart has the SAME class of bug (hardcoded
-    # divisors 12.0/12.0/12.0/14.0 instead of each mark row's actual
-    # subject.unit_X_max) but wasn't in scope for this fix since it's a
-    # department-wide aggregate, not the per-student strongest/weakest
-    # unit logic you reported. Flagging it in case you want it fixed too —
-    # it would need to divide by each row's own subject.unit_N_max rather
-    # than one global assumed max per unit.
-    # Compute unit mastery using dynamic per-subject unit max values (no hardcoded denominators)
     u1_percs = []
     u2_percs = []
     u3_percs = []
     u4_percs = []
 
-    # Evaluate QuerySet once to avoid repeated database hits
     marks_list = list(all_marks_qs)
 
     for m in marks_list:
@@ -1189,13 +1148,11 @@ def analytics_dashboard(request):
         if not subj:
             continue
 
-        # Resolve unit max values with common fallbacks
         u1_max = getattr(subj, 'unit_1_max', None) or getattr(subj, 'max_unit_1', None) or 0
         u2_max = getattr(subj, 'unit_2_max', None) or getattr(subj, 'max_unit_2', None) or 0
         u3_max = getattr(subj, 'unit_3_max', None) or getattr(subj, 'max_unit_3', None) or 0
         u4_max = getattr(subj, 'unit_4_max', None) or getattr(subj, 'max_unit_4', None) or 0
 
-        # Collect percentages only when both marks and a valid max exist
         try:
             if getattr(m, 'unit_1_marks', None) is not None and u1_max and float(u1_max) > 0:
                 u1_percs.append((float(m.unit_1_marks) / float(u1_max)) * 100.0)
@@ -1220,7 +1177,6 @@ def analytics_dashboard(request):
         except Exception:
             logger.exception("unit 4 percent calc failed for mark id %s", getattr(m, 'id', None))
 
-    # Average each unit's percentages to produce unit mastery values (0-100%)
     u1_avg = round(sum(u1_percs) / len(u1_percs), 1) if u1_percs else 0.0
     u2_avg = round(sum(u2_percs) / len(u2_percs), 1) if u2_percs else 0.0
     u3_avg = round(sum(u3_percs) / len(u3_percs), 1) if u3_percs else 0.0
@@ -1228,7 +1184,6 @@ def analytics_dashboard(request):
 
     unit_mastery = [u1_avg, u2_avg, u3_avg, u4_avg]
 
-    # Totals, pass rates and averages
     total_st = Student.objects.filter(year=selected_year).count() if selected_year else Student.objects.count()
     eval_count = len(marks_list)
 
@@ -1265,7 +1220,7 @@ def analytics_dashboard(request):
 
         first_m = st_m[0] if st_m else None
         ai_data = analyze_student_performance(first_m, att_val) if first_m else {
-            'fail_prob': 0, 'risk_level': 'STABLE', 'badge_class': 'success', 'remedial_plan': 'Maintain current study routine.'
+            'fail_prob': 0, 'risk_level': 'STABLE', 'badge_class': 'success', 'remedial_plan': 'Maintain current study routine.', 'remedial_str': 'Maintain current study routine.'
         }
 
         action_status = compute_smart_action_status(att_val, st_avg)
@@ -1302,7 +1257,7 @@ def analytics_dashboard(request):
             'risk': ai_data['fail_prob'],
             'level': ai_data['risk_level'],
             'badge': ai_data['badge_class'],
-            'remedial': ai_data['remedial_plan']
+            'remedial': ai_data['remedial_str']
         })
 
     sort_mode = request.GET.get('sort', 'roll')
@@ -1498,9 +1453,27 @@ def upload_excel_view(request):
                         subject = Subject.objects.create(name=subj_name)
                         subject_lookup[subj_name] = subject
 
-                    def get_mark(col):
+                    def get_validated_mark(col, max_val):
                         val = row.get(col)
-                        return float(val) if pd.notna(val) and str(val).strip() != '' else None
+                        if pd.notna(val) and str(val).strip() != '':
+                            try:
+                                num = float(val)
+                                # Cap excess scores automatically instead of raising an error
+                                if max_val > 0 and num > max_val:
+                                    return float(max_val)
+                                return num
+                            except ValueError:
+                                return None
+                        return None
+
+                    u1_m = getattr(subject, 'unit_1_max', 0) or getattr(subject, 'max_unit_1', 0) or 0
+                    u2_m = getattr(subject, 'unit_2_max', 0) or getattr(subject, 'max_unit_2', 0) or 0
+                    u3_m = getattr(subject, 'unit_3_max', 0) or getattr(subject, 'max_unit_3', 0) or 0
+                    u4_m = getattr(subject, 'unit_4_max', 0) or getattr(subject, 'max_unit_4', 0) or 0
+                    pr_m = getattr(subject, 'max_practical_marks', 0) or 0
+                    int_m = getattr(subject, 'max_internal_marks', 0) or 0
+                    ass_m = getattr(subject, 'max_assignment_marks', 0) or 0
+                    pres_m = getattr(subject, 'max_presentation_marks', 0) or 0
 
                     semester = int(row.get('Semester', 1)) if pd.notna(row.get('Semester')) else 1
 
@@ -1510,15 +1483,15 @@ def upload_excel_view(request):
                         semester=semester
                     )
 
-                    marks_obj.unit_1_marks = get_mark('Unit 1')
-                    marks_obj.unit_2_marks = get_mark('Unit 2')
-                    marks_obj.unit_3_marks = get_mark('Unit 3')
-                    marks_obj.unit_4_marks = get_mark('Unit 4')
+                    marks_obj.unit_1_marks = get_validated_mark('Unit 1', u1_m)
+                    marks_obj.unit_2_marks = get_validated_mark('Unit 2', u2_m)
+                    marks_obj.unit_3_marks = get_validated_mark('Unit 3', u3_m)
+                    marks_obj.unit_4_marks = get_validated_mark('Unit 4', u4_m)
 
-                    marks_obj.practical_marks = get_mark('Practical')
-                    marks_obj.internal_marks = get_mark('Internal')
-                    marks_obj.assignment_marks = get_mark('Assignment')
-                    marks_obj.presentation_marks = get_mark('Presentation')
+                    marks_obj.practical_marks = get_validated_mark('Practical', pr_m)
+                    marks_obj.internal_marks = get_validated_mark('Internal', int_m)
+                    marks_obj.assignment_marks = get_validated_mark('Assignment', ass_m)
+                    marks_obj.presentation_marks = get_validated_mark('Presentation', pres_m)
 
                     marks_obj.excel_batch = excel_batch
                     marks_obj.save()
@@ -1582,7 +1555,6 @@ def upload_excel_view(request):
 
 @login_required
 def upload_history(request):
-    """REQ 1 & REQ 4: Upload History, Excel Batch Workbooks, and Year Summaries."""
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
@@ -1606,7 +1578,6 @@ def upload_history(request):
 
 @login_required
 def delete_year_data(request, year_code):
-    """REQ 4: Purge all student data associated with a specific Academic Year."""
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
@@ -1625,7 +1596,6 @@ def delete_year_data(request, year_code):
 
 @login_required
 def delete_excel_batch(request, batch_id):
-    """REQ 1: Delete specific Excel Workbook entry and its logged metadata."""
     if _is_student_role(request.user):
         messages.error(request, "Access denied.")
         return redirect('students:student_dashboard')
