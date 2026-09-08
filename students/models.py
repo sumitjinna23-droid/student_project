@@ -343,7 +343,7 @@ class Marks(models.Model):
     total_internal_marks = models.FloatField(null=True, blank=True)
     total_marks = models.FloatField(null=True, blank=True)
     percentage = models.FloatField(default=0.0)
-    grade = models.CharField(max_length=10, blank=True)
+    grade = models.CharField(max_length=50, blank=True)
     result_status = models.CharField(max_length=50, blank=True)
 
     weakest_unit = models.CharField(max_length=100, blank=True)
