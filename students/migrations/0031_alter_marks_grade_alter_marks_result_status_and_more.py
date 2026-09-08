@@ -13,12 +13,12 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='marks',
             name='grade',
-            field=models.CharField(blank=True, max_length=10),
+            field=models.CharField(blank=True, max_length=50),
         ),
         migrations.AlterField(
             model_name='marks',
             name='result_status',
-            field=models.CharField(blank=True, max_length=30),
+            field=models.CharField(blank=True, max_length=50),
         ),
         migrations.AlterField(
             model_name='student',
