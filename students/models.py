@@ -190,9 +190,9 @@ class Student(models.Model):
     roll_number = models.CharField(max_length=50, unique=True)
 
     # Independent Programme and Academic Part Tracking
-    programme = models.CharField(max_length=20, choices=PROGRAMME_CHOICES, default='BSC')
-    part = models.CharField(max_length=10, choices=PART_CHOICES, default='FY')
-    year = models.CharField(max_length=10, choices=YEAR_CHOICES, default='FY')
+    programme = models.CharField(max_length=50, choices=PROGRAMME_CHOICES, default='BSC')
+    part = models.CharField(max_length=50, choices=PART_CHOICES, default='FY')
+    year = models.CharField(max_length=50, choices=YEAR_CHOICES, default='FY')
 
     # Batch-tracking: which ExcelBatch created this student (nullable)
     created_in_batch = models.ForeignKey('ExcelBatch', null=True, blank=True, on_delete=models.SET_NULL, related_name='created_students')
@@ -343,8 +343,8 @@ class Marks(models.Model):
     total_internal_marks = models.FloatField(null=True, blank=True)
     total_marks = models.FloatField(null=True, blank=True)
     percentage = models.FloatField(default=0.0)
-    grade = models.CharField(max_length=5, blank=True)
-    result_status = models.CharField(max_length=10, blank=True)
+    grade = models.CharField(max_length=10, blank=True)
+    result_status = models.CharField(max_length=30, blank=True)
 
     weakest_unit = models.CharField(max_length=100, blank=True)
     strongest_unit = models.CharField(max_length=100, blank=True)
@@ -521,7 +521,7 @@ class UserProfile(models.Model):
         STUDENT = "STUDENT", "Student"
 
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    role = models.CharField(max_length=10, choices=Role.choices, default=Role.STUDENT)
+    role = models.CharField(max_length=30, choices=Role.choices, default=Role.STUDENT)
     student = models.OneToOneField(Student, on_delete=models.SET_NULL, null=True, blank=True, related_name='user_account')
     college_email = models.EmailField(unique=True, null=True, blank=True)
     roll_number = models.CharField(max_length=50, null=True, blank=True)
