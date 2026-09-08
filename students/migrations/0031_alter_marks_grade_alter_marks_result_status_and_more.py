@@ -38,6 +38,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='userprofile',
             name='role',
-            field=models.CharField(choices=[('TEACHER', 'Teacher'), ('STUDENT', 'Student')], default='STUDENT', max_length=30),
+            field=models.CharField(choices=[('TEACHER', 'Teacher'), ('STUDENT', 'Student')], default='STUDENT', max_length=50),
         ),
     ]

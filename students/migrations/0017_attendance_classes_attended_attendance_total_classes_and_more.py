@@ -23,11 +23,11 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='student',
             name='part',
-            field=models.CharField(choices=[('PART1', 'Part I'), ('PART2', 'Part II'), ('FY', 'First Year'), ('SY', 'Second Year'), ('TY', 'Third Year')], default='FY', max_length=10),
+            field=models.CharField(choices=[('PART1', 'Part I'), ('PART2', 'Part II'), ('FY', 'First Year'), ('SY', 'Second Year'), ('TY', 'Third Year')], default='FY', max_length=50),
         ),
         migrations.AddField(
             model_name='student',
             name='programme',
-            field=models.CharField(choices=[('FMCS', 'M.Sc. Computer Science (FMCS)'), ('SMCS', 'M.Sc. Computer Science (SMCS)'), ('BSC', 'B.Sc. Computer Science')], default='BSC', max_length=20),
+            field=models.CharField(choices=[('FMCS', 'M.Sc. Computer Science (FMCS)'), ('SMCS', 'M.Sc. Computer Science (SMCS)'), ('BSC', 'B.Sc. Computer Science')], default='BSC', max_length=50),
         ),
     ]

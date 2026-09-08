@@ -62,6 +62,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='subject',
             name='subject_type',
-            field=models.CharField(choices=[('THEORY', 'Theory Only'), ('PRACTICAL', 'Practical Only'), ('BOTH', 'Theory & Practical / Combined')], default='THEORY', max_length=15),
+            field=models.CharField(choices=[('THEORY', 'Theory Only'), ('PRACTICAL', 'Practical Only'), ('BOTH', 'Theory & Practical / Combined')], default='THEORY', max_length=50),
         ),
     ]

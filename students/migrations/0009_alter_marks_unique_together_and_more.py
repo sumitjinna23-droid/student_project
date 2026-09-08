@@ -90,7 +90,7 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='subject',
             name='subject_type',
-            field=models.CharField(default='THEORY', max_length=20),
+            field=models.CharField(default='THEORY', max_length=50),
         ),
         migrations.AlterUniqueTogether(
             name='attendance',
@@ -111,7 +111,7 @@ class Migration(migrations.Migration):
             name='UserProfile',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('role', models.CharField(choices=[('TEACHER', 'Teacher / Faculty'), ('STUDENT', 'Student')], default='STUDENT', max_length=10)),
+                ('role', models.CharField(choices=[('TEACHER', 'Teacher / Faculty'), ('STUDENT', 'Student')], default='STUDENT', max_length=50)),
                 ('user', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='profile', to=settings.AUTH_USER_MODEL)),
             ],
         ),

@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='student',
             name='subject_type',
-            field=models.CharField(choices=[('major', 'Major'), ('minor', 'Minor')], default=django.utils.timezone.now, max_length=10),
+            field=models.CharField(choices=[('major', 'Major'), ('minor', 'Minor')], default=django.utils.timezone.now, max_length=50),
             preserve_default=False,
         ),
     ]

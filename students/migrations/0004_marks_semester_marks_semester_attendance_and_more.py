@@ -24,12 +24,12 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='student',
             name='year',
-            field=models.CharField(choices=[('FY', 'First Year'), ('SY', 'Second Year'), ('TY', 'Third Year'), ('MSC1', 'MSc Part 1'), ('MSC2', 'MSc Part 2')], default='FY', max_length=10),
+            field=models.CharField(choices=[('FY', 'First Year'), ('SY', 'Second Year'), ('TY', 'Third Year'), ('MSC1', 'MSc Part 1'), ('MSC2', 'MSc Part 2')], default='FY', max_length=50),
             preserve_default=False,
         ),
         migrations.AlterField(
             model_name='subject',
             name='subject_type',
-            field=models.CharField(choices=[('MAJOR', 'Major'), ('MINOR', 'Minor')], max_length=10),
+            field=models.CharField(choices=[('MAJOR', 'Major'), ('MINOR', 'Minor')], max_length=50),
         ),
     ]

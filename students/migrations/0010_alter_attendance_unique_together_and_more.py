@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='marks',
             name='grade',
-            field=models.CharField(blank=True, max_length=5),
+            field=models.CharField(blank=True, max_length=50),
         ),
         migrations.AddField(
             model_name='marks',
@@ -51,7 +51,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='marks',
             name='result_status',
-            field=models.CharField(blank=True, max_length=10),
+            field=models.CharField(blank=True, max_length=50),
         ),
         migrations.AddField(
             model_name='marks',
@@ -136,11 +136,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='subject',
             name='subject_type',
-            field=models.CharField(choices=[('THEORY', 'Theory Only'), ('PRACTICAL', 'Practical Only'), ('BOTH', 'Theory & Practical Combined')], default='THEORY', max_length=15),
+            field=models.CharField(choices=[('THEORY', 'Theory Only'), ('PRACTICAL', 'Practical Only'), ('BOTH', 'Theory & Practical Combined')], default='THEORY', max_length=50),
         ),
         migrations.AlterField(
             model_name='userprofile',
             name='role',
-            field=models.CharField(choices=[('TEACHER', 'Teacher'), ('STUDENT', 'Student')], default='STUDENT', max_length=10),
+            field=models.CharField(choices=[('TEACHER', 'Teacher'), ('STUDENT', 'Student')], default='STUDENT', max_length=50),
         ),
     ]
