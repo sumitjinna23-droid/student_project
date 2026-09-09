@@ -22,7 +22,7 @@
             --accent-blue: #3B82F6;
             --accent-blue-2: #0b74ff;
             --text-main: #F9FAFB;
-            --muted-contrast: #9CA3AF; /* readable muted on dark */
+            --muted-contrast: #9CA3AF;
             --card-text: #E6EEF8;
         }
 
@@ -30,6 +30,7 @@
             background-color: var(--bg-base);
             color: var(--text-main);
             font-family: 'Plus Jakarta Sans', sans-serif;
+            overflow-x: hidden;
         }
 
         .card-glass {
@@ -65,18 +66,15 @@
         .badge-risk-warning { background: rgba(245, 158, 11, 0.2); color: #FDE047; border: 1px solid rgba(245, 158, 11, 0.4); }
         .badge-risk-success { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.4); }
 
-        /* Small visual tweak to align select labels with smaller bottom margins */
         .card-glass .form-label { margin-bottom: .25rem; color: var(--muted-contrast); }
 
-        /* Add helper so Reset Filters aligns same row as selects */
         .filters-row .form-label { margin-bottom:.25rem; }
-        .filters-row .form-select { height: calc(2.25rem + 6px); } /* match button height visually */
+        .filters-row .form-select { height: calc(2.25rem + 6px); }
 
-        /* Improve muted text contrast across dashboard so hidden/too-dark text becomes visible */
         .better-contrast, .text-muted { color: var(--muted-contrast) !important; }
         .table.table-dark .text-muted { color: var(--muted-contrast) !important; }
         .empty-row { color: var(--muted-contrast) !important; font-weight: 500; }
-        /* Scrollable & compact styling for Action Plan column */
+
         .action-plan-cell {
             max-width: 320px;
             vertical-align: top !important;
@@ -96,7 +94,6 @@
             border-radius: 4px;
         }
 
-        /* Segmented toggle control (balanced size) */
         .btn-segment {
           display: inline-flex;
           background: rgba(255,255,255,0.03);
@@ -105,6 +102,8 @@
           padding: 3px;
           align-items: center;
           gap: 6px;
+          max-width: 100%;
+          overflow-x: auto;
         }
         .btn-segment .seg-btn {
           display: inline-flex;
@@ -116,10 +115,11 @@
           color: var(--text-main);
           border: none;
           font-weight: 600;
-          font-size: 0.9rem;
+          font-size: 0.85rem;
           height: 36px;
           line-height: 1;
           text-decoration: none;
+          white-space: nowrap;
           transition: background .12s ease, transform .06s ease;
         }
         .btn-segment .seg-btn:hover { transform: translateY(-1px); background: rgba(255,255,255,0.02); }
@@ -136,7 +136,6 @@
           border-radius: 1px;
         }
 
-        /* make small helper line visible left of roster (so text is visible without dragging) */
         .helper-line {
             display: inline-block;
             background: rgba(59,130,246,0.12);
@@ -147,11 +146,15 @@
             margin-bottom: 8px;
         }
 
-        /* Modal date visibility */
         .modal .small.text-light { color: #e6eef8 !important; }
-
-        /* Ensure empty placeholder rows in tables are visible */
         .table .empty-row { color: var(--card-text) !important; background: transparent !important; }
+
+        @media (max-width: 768px) {
+            .metric-title { font-size: 0.72rem !important; }
+            .metric-value { font-size: 1.4rem !important; }
+            .metric-subtext { font-size: 0.72rem !important; }
+            .card-glass, .ai-terminal { padding: 1rem !important; }
+        }
 
         @media print {
             @page {
@@ -190,12 +193,11 @@
 </head>
 <body>
 
-    <!-- Unified Command Header (With Password Reset Link) -->
-    <div class="user-profile-header d-flex justify-content-between align-items-center px-4 py-3 bg-dark border-bottom border-secondary mb-4">
+    <!-- Unified Command Header -->
+    <div class="user-profile-header d-flex justify-content-between align-items-center px-3 px-md-4 py-3 bg-dark border-bottom border-secondary mb-3 mb-md-4">
         <div class="d-flex align-items-center gap-2">
             <i class="fa-solid fa-user-shield text-primary fs-5"></i>
-            <span class="fw-bold text-white fs-6">
-                Active Session:
+            <span class="fw-bold text-white fs-6 text-truncate" style="max-width: 200px;">
                 {% if request.user.is_authenticated %}
                     {{ user_display_name|default:request.user.username }}
                 {% else %}
@@ -210,11 +212,11 @@
         </div>
     </div>
 
-<div class="container-fluid px-4 py-2" id="dossierContent">
+<div class="container-fluid px-2 px-md-4 py-2" id="dossierContent">
 
     {% if messages %}
         {% for message in messages %}
-            <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show no-print" role="alert">
+            <div class="alert alert-{% if message.tags == 'error' %}danger{% else %}{{ message.tags }}{% endif %} alert-dismissible fade show no-print mb-3" role="alert">
                 <i class="fa-solid {% if message.tags == 'error' %}fa-circle-exclamation{% else %}fa-circle-check{% endif %} me-2"></i>
                 {{ message }}
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
@@ -223,20 +225,18 @@
     {% endif %}
 
     <!-- HEADER & SEARCH BAR -->
-<div class="card bg-dark text-white border-secondary p-4 mb-4 no-print shadow-sm rounded-4">
-    <!-- Row 1: Top Command Hub Title Block -->
+<div class="card bg-dark text-white border-secondary p-3 p-md-4 mb-3 mb-md-4 no-print shadow-sm rounded-4">
     <div class="mb-3">
-        <h2 class="fw-extrabold mb-1 d-flex align-items-center gap-2 text-white">
-            <i class="fa-solid fa-graduation-cap text-primary fs-2"></i> Department Executive Command Hub
+        <h2 class="fw-extrabold mb-1 d-flex align-items-center gap-2 text-white fs-4 fs-md-2">
+            <i class="fa-solid fa-graduation-cap text-primary"></i> Department Executive Command Hub
         </h2>
         <div class="text-secondary small fw-medium better-contrast">Centralized Academic Operating System for Faculty</div>
     </div>
 
     <hr class="border-secondary opacity-25 my-3">
 
-    <!-- Row 2: Right-Aligned Action Controls -->
-    <div class="d-flex justify-content-end align-items-center gap-2 flex-wrap">
-        <form method="GET" class="d-flex gap-2">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-stretch align-items-md-center gap-2 flex-wrap">
+        <form method="GET" class="d-flex gap-2 flex-grow-1 max-w-md-50">
             <div class="input-group">
                 <span class="input-group-text bg-dark text-secondary border-secondary">
                     <i class="fa-solid fa-magnifying-glass"></i>
@@ -247,25 +247,26 @@
             <button type="submit" class="btn btn-primary fw-bold px-3">Inspect</button>
         </form>
 
-        <a href="/admin/" class="btn btn-outline-warning fw-bold px-3 d-flex align-items-center gap-2">
-            <i class="fa-solid fa-gear"></i> Admin Panel
-         </a>
+        <div class="d-flex gap-2 flex-wrap justify-content-start justify-content-md-end mt-2 mt-md-0">
+            <a href="/admin/" class="btn btn-outline-warning fw-bold px-3 flex-fill flex-md-grow-0 d-flex align-items-center justify-content-center gap-2">
+                <i class="fa-solid fa-gear"></i> Admin
+             </a>
 
-        <button class="btn btn-outline-info fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#batchHistoryModal">
-            <i class="fa-solid fa-clock-rotate-left"></i> History
-        </button>
+            <button class="btn btn-outline-info fw-bold px-3 flex-fill flex-md-grow-0 d-flex align-items-center justify-content-center gap-2" data-bs-toggle="modal" data-bs-target="#batchHistoryModal">
+                <i class="fa-solid fa-clock-rotate-left"></i> History
+            </button>
 
-        <button class="btn btn-success fw-bold px-3 d-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
-            <i class="fa-solid fa-file-excel"></i> Upload Excel / CSV
-        </button>
+            <button class="btn btn-success fw-bold px-3 flex-fill flex-md-grow-0 d-flex align-items-center justify-content-center gap-2" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                <i class="fa-solid fa-file-excel"></i> Upload
+            </button>
+        </div>
     </div>
 </div>
 
     <!-- SCOPE FILTER BAR -->
-    <div class="card-glass p-3 mb-4 no-print">
-        <!-- Changed: align-items-end and added filters-row helper class so Reset button aligns -->
+    <div class="card-glass p-3 mb-3 mb-md-4 no-print">
         <form method="GET" class="row g-3 align-items-end filters-row">
-            <div class="col-md-5">
+            <div class="col-12 col-md-5">
                 <label class="form-label text-muted small fw-bold mb-1">PROGRAM / CLASS SCOPE:</label>
                 <select name="year" class="form-select bg-dark text-white border-secondary" onchange="this.form.submit()">
                     <option value="">All Classes (B.Sc + M.Sc)</option>
@@ -275,7 +276,7 @@
                 </select>
             </div>
 
-            <div class="col-md-5">
+            <div class="col-12 col-md-5">
                 <label class="form-label text-muted small fw-bold mb-1">SUBJECT SCOPE:</label>
                 <select name="subject" class="form-select bg-dark text-white border-secondary" onchange="this.form.submit()">
                     <option value="">All Subjects (Department Overview)</option>
@@ -287,32 +288,31 @@
                 </select>
             </div>
 
-            <div class="col-md-2 d-flex align-items-end justify-content-end">
-                <!-- Use named URL so it remains correct in different setups -->
+            <div class="col-12 col-md-2 d-flex align-items-end justify-content-end">
                 <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light w-100">Reset Filters</a>
             </div>
         </form>
     </div>
 
     <!-- AI COPILOT TERMINAL -->
-    <div class="ai-terminal p-4 mb-4 no-print">
-        <div class="d-flex align-items-center justify-content-between mb-2">
+    <div class="ai-terminal p-3 p-md-4 mb-3 mb-md-4 no-print">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
             <div class="d-flex align-items-center gap-2">
                 <i class="fa-solid fa-brain text-purple fs-5"></i>
-                <h5 class="fw-bold mb-0 text-white">Live AI Copilot Insights</h5>
+                <h5 class="fw-bold mb-0 text-white fs-6 fs-md-5">Live AI Copilot Insights</h5>
             </div>
-            <span class="badge bg-primary text-white">AUTOPILOT ENGINE ACTIVE</span>
+            <span class="badge bg-primary text-white" style="font-size: 0.7rem;">AUTOPILOT ENGINE ACTIVE</span>
         </div>
-        <p class="mb-0 text-light opacity-90 fs-6 lh-base" style="font-family: monospace;">
+        <p class="mb-0 text-light opacity-90 small fs-md-6 lh-base" style="font-family: monospace;">
             &gt; {{ ai_copilot_recommendation|default:"All student performance indicators parsed. No critical anomalies detected." }}
         </p>
     </div>
 
     {% if is_student_mode %}
     <!-- MODE 1: SINGLE-STUDENT 360° DOSSIER -->
-    <div class="alert alert-info border-0 bg-primary text-white p-3 rounded-3 mb-4 d-flex justify-content-between align-items-center">
+    <div class="alert alert-info border-0 bg-primary text-white p-3 rounded-3 mb-3 mb-md-4 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
         <div>
-            <h4 class="fw-bold mb-0">
+            <h4 class="fw-bold mb-1 fs-5 fs-md-4">
                 <i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier:
                 {% if student.name %}
                     {{ student.name|title }}
@@ -322,57 +322,57 @@
                     Student #{{ student.id }}
                 {% endif %}
             </h4>
-            <span>Roll Number: <strong>{{ student.roll_number }}</strong> | Class: <strong>{{ student.get_year_display }}</strong></span>
+            <span class="small">Roll Number: <strong>{{ student.roll_number }}</strong> | Class: <strong>{{ student.get_year_display }}</strong></span>
         </div>
-        <div class="d-flex gap-2 no-print">
-            <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold shadow-sm">
-                <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export Report PDF
+        <div class="d-flex gap-2 w-100 w-md-auto no-print">
+            <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold shadow-sm flex-fill flex-md-grow-0">
+                <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export PDF
             </button>
-            <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light btn-sm fw-bold">← Back to Overview</a>
+            <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light btn-sm fw-bold flex-fill flex-md-grow-0">← Back</a>
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Overall Academic Score</span>
-                <div class="fs-2 fw-bold text-primary mt-1">{{ overall_academic_avg|default:0 }}%</div>
-                <small class="text-light opacity-50">Across {{ total_subjects_evaluated|default:0 }} subject(s)</small>
+    <div class="row g-2 g-md-3 mb-3 mb-md-4">
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Overall Score</span>
+                <div class="metric-value fs-2 fw-bold text-primary mt-1">{{ overall_academic_avg|default:0 }}%</div>
+                <small class="text-light opacity-50 metric-subtext">Across {{ total_subjects_evaluated|default:0 }} subject(s)</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Total Attendance</span>
-                <div class="fs-2 fw-bold {% if overall_att < 75 %}text-danger{% else %}text-info{% endif %} mt-1">{{ overall_att|default:0 }}%</div>
-                <small class="text-light opacity-50">Mandatory Threshold: 75%</small>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Attendance</span>
+                <div class="metric-value fs-2 fw-bold {% if overall_att < 75 %}text-danger{% else %}text-info{% endif %} mt-1">{{ overall_att|default:0 }}%</div>
+                <small class="text-light opacity-50 metric-subtext">Min Benchmark: 75%</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Strongest Domain</span>
-                <div class="fs-4 fw-bold text-success mt-1 text-truncate">{{ strongest_subject|default:"N/A" }}</div>
-                <small class="text-light opacity-50">Peak Performance Area</small>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Strongest Domain</span>
+                <div class="metric-value fs-4 fw-bold text-success mt-1 text-truncate">{{ strongest_subject|default:"N/A" }}</div>
+                <small class="text-light opacity-50 metric-subtext">Peak Performance Area</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Predictive AI Risk</span>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">AI Risk</span>
                 <div class="mt-2">
-                    <span class="badge badge-risk-{{ student_badge_class|default:'success' }} fs-6 px-3 py-2">
-                        {{ student_risk_level|default:"STABLE" }} ({{ student_risk_score|default:0 }}% Fail Risk)
+                    <span class="badge badge-risk-{{ student_badge_class|default:'success' }} fs-6 px-2 px-md-3 py-1 py-md-2 text-truncate max-w-100">
+                        {{ student_risk_level|default:"STABLE" }} ({{ student_risk_score|default:0 }}%)
                     </span>
                 </div>
-                <small class="text-light opacity-50 mt-1 d-block">Parent Meeting Alert Flag</small>
+                <small class="text-light opacity-50 mt-1 d-block metric-subtext">Parent Alert Flag</small>
             </div>
         </div>
     </div>
-<!-- REQUIREMENT 2: Full Achievement Depth Rendering - only show when achievements exist -->
+
 {% if achievements and achievements|length > 0 %}
-<div class="card-glass p-4 mb-4 border-warning">
-    <h5 class="fw-bold text-warning mb-3"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
+<div class="card-glass p-3 p-md-4 mb-3 mb-md-4 border-warning">
+    <h5 class="fw-bold text-warning mb-3 fs-6 fs-md-5"><i class="fa-solid fa-trophy me-2"></i>Recognized Honors & Student Achievements</h5>
     <div class="row g-3">
         {% for item in achievements %}
-            <div class="col-md-6 col-lg-4">
+            <div class="col-12 col-md-6 col-lg-4">
                 <div class="p-3 bg-dark rounded border border-warning h-100 d-flex flex-column justify-content-between">
                     <div>
                         <div class="d-flex justify-content-between align-items-center mb-2">
@@ -397,19 +397,19 @@
 </div>
 {% endif %}
 
-    <div class="card-glass p-4 mb-4 border-warning">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <h5 class="fw-bold text-warning mb-0"><i class="fa-solid fa-comment-sms me-2"></i>Auto-Generated Parent Notice Synthesizer</h5>
-            <button id="copyNoticeBtn" class="btn btn-sm btn-outline-warning no-print" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
-                <i class="fa-solid fa-copy me-1"></i> Copy Notice Text
+    <div class="card-glass p-3 p-md-4 mb-3 mb-md-4 border-warning">
+        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2 mb-2">
+            <h5 class="fw-bold text-warning mb-0 fs-6 fs-md-5"><i class="fa-solid fa-comment-sms me-2"></i>Auto-Generated Parent Notice Synthesizer</h5>
+            <button id="copyNoticeBtn" class="btn btn-sm btn-outline-warning no-print w-100 w-sm-auto" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
+                <i class="fa-solid fa-copy me-1"></i> Copy Text
             </button>
         </div>
-        <pre id="noticeText" class="p-3 bg-dark text-white rounded border border-secondary mb-0" style="white-space: pre-wrap; font-family: inherit;">{{ parent_notice_draft }}</pre>
+        <pre id="noticeText" class="p-3 bg-dark text-white rounded border border-secondary mb-0 small" style="white-space: pre-wrap; font-family: inherit;">{{ parent_notice_draft }}</pre>
     </div>
 
     <!-- PART 1: ACADEMIC SUMMARY TABLE -->
-    <div class="card-glass p-4 mb-4">
-        <h5 class="fw-bold text-white mb-3">
+    <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
+        <h5 class="fw-bold text-white mb-3 fs-6 fs-md-5">
             <i class="fa-solid fa-book-open me-2 text-primary"></i>Subject Performance & AI Recommendations
         </h5>
         <div class="table-responsive">
@@ -430,12 +430,9 @@
                 <tbody>
                     {% for item in subject_performances %}
                     <tr>
-                        <td class="fw-bold text-white fs-6">{{ item.subject }}</td>
-                        <!-- FIX (requirement #3): semester_exam_display instead
-                             of the raw field + |default:"0.0", which showed a
-                             misleading 0.0 for practical-only subjects. -->
+                        <td class="fw-bold text-white fs-6 text-nowrap">{{ item.subject }}</td>
                         <td class="fw-bold text-info">{{ item.marks.semester_exam_display }}</td>
-                        <td class="fw-bold text-white">{{ item.marks.total_marks|default:0 }} / {{ item.subject.total_max_marks|default:100 }}</td>
+                        <td class="fw-bold text-white text-nowrap">{{ item.marks.total_marks|default:0 }} / {{ item.subject.total_max_marks|default:100 }}</td>
                         <td class="fw-bold text-primary fs-6">{{ item.percentage|default:0 }}%</td>
                         <td>
                             <span class="badge bg-primary px-2 py-1 fs-6">{{ item.marks.grade|default:"N/A" }}</span>
@@ -447,10 +444,10 @@
                                 <span class="badge bg-danger px-2 py-1 fs-6">FAIL</span>
                             {% endif %}
                         </td>
-                        <td class="text-success fw-semibold">
+                        <td class="text-success fw-semibold text-nowrap">
                             <i class="fa-solid fa-arrow-trend-up me-1"></i>{{ item.marks.strongest_unit|default:"-" }}
                         </td>
-                        <td class="text-warning fw-semibold">
+                        <td class="text-warning fw-semibold text-nowrap">
                             <i class="fa-solid fa-arrow-trend-down me-1"></i>{{ item.marks.weakest_unit|default:"-" }}
                         </td>
                         <td style="min-width: 250px;">
@@ -473,8 +470,8 @@
     </div>
 
    <!-- PART 2: DETAILED COMPONENT BREAKDOWN -->
-    <div class="card-glass p-4 mb-4">
-        <h5 class="fw-bold text-white mb-3">
+    <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
+        <h5 class="fw-bold text-white mb-3 fs-6 fs-md-5">
             <i class="fa-solid fa-list-check me-2 text-info"></i>Detailed Assessment Component Breakdown
         </h5>
         <div class="table-responsive">
@@ -495,7 +492,7 @@
                 <tbody>
                     {% for item in subject_performances %}
                     <tr>
-                        <td class="fw-bold text-white text-start fs-6">{{ item.subject }}</td>
+                        <td class="fw-bold text-white text-start fs-6 text-nowrap">{{ item.subject }}</td>
 
                         <td>
                             {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_1_marks is None %}
@@ -588,13 +585,13 @@
     </div>
 
     <!-- PART 3: SUBJECT-WISE ATTENDANCE BREAKDOWN -->
-    <div class="card-glass p-4 mb-4">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h5 class="fw-bold text-white mb-0">
+    <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
+        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2 mb-3">
+            <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5">
                 <i class="fa-solid fa-calendar-check me-2 text-info"></i>Subject-Wise Attendance Breakdown
             </h5>
             <div class="fs-6 text-white">
-                Overall Attendance:
+                Overall:
                 <span class="badge {% if overall_att < 75 %}badge-risk-danger{% else %}badge-risk-success{% endif %} fs-6 ms-1">
                     {{ overall_att|default:0 }}%
                 </span>
@@ -620,7 +617,7 @@
                 <tbody>
                     {% for att in subject_attendances %}
                     <tr>
-                        <td class="text-start fw-bold text-white">{{ att.subject.name }}</td>
+                        <td class="text-start fw-bold text-white text-nowrap">{{ att.subject.name }}</td>
 
                         {% if att.theory_total > 0 %}
                             <td class="text-light">{{ att.theory_attended }}</td>
@@ -638,7 +635,7 @@
                             <td colspan="3" class="text-light small">N/A (No Lab)</td>
                         {% endif %}
 
-                        <td class="fw-semibold text-white">{{ att.total_attended }} / {{ att.total_classes_conducted }}</td>
+                        <td class="fw-semibold text-white text-nowrap">{{ att.total_attended }} / {{ att.total_classes_conducted }}</td>
                         <td>
                             <span class="badge {% if att.overall_subject_percentage < 75 %}badge-risk-danger{% else %}badge-risk-success{% endif %} fs-6">
                                 {{ att.overall_subject_percentage }}%
@@ -646,7 +643,7 @@
                         </td>
 
                         <td>
-                            <span class="badge bg-{{ att.attendance_status.color|default:'primary' }} px-2 py-1">
+                            <span class="badge bg-{{ att.attendance_status.color|default:'primary' }} px-2 py-1 text-nowrap">
                                 {% if att.attendance_status.icon %}
                                     <i class="{{ att.attendance_status.icon }} me-1"></i>
                                 {% endif %}
@@ -666,77 +663,83 @@
 
     {% else %}
     <!-- MODE 2: COMPLETE DEPARTMENT OVERVIEW MODE -->
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Total Department Students</span>
-                <div class="fs-2 fw-bold text-white mt-1">{{ total_students|default:0 }}</div>
-                <small class="text-light opacity-50">Enrolled across active classes</small>
+    <div class="row g-2 g-md-3 mb-3 mb-md-4">
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Total Students</span>
+                <div class="metric-value fs-2 fw-bold text-white mt-1">{{ total_students|default:0 }}</div>
+                <small class="text-light opacity-50 metric-subtext">Active enrolled</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Department Academic Mean</span>
-                <div class="fs-2 fw-bold text-primary mt-1">{{ overall_avg_marks|default:0 }}%</div>
-                <small class="text-light opacity-50">Aggregate domain score</small>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Academic Mean</span>
+                <div class="metric-value fs-2 fw-bold text-primary mt-1">{{ overall_avg_marks|default:0 }}%</div>
+                <small class="text-light opacity-50 metric-subtext">Aggregate score</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Department Attendance</span>
-                <div class="fs-2 fw-bold text-info mt-1">{{ overall_avg_att|default:0 }}%</div>
-                <small class="text-light opacity-50">Average presence</small>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Attendance</span>
+                <div class="metric-value fs-2 fw-bold text-info mt-1">{{ overall_avg_att|default:0 }}%</div>
+                <small class="text-light opacity-50 metric-subtext">Average presence</small>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card-glass p-3">
-                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1" style="font-size: 0.8rem;">Overall Pass Rate</span>
-                <div class="fs-2 fw-bold text-success mt-1">{{ overall_pass_rate|default:0 }}%</div>
-                <small class="text-light opacity-50">Meeting passing benchmark</small>
+        <div class="col-6 col-md-3">
+            <div class="card-glass p-3 h-100">
+                <span class="text-uppercase fw-bold text-light opacity-75 d-block mb-1 metric-title" style="font-size: 0.8rem;">Pass Rate</span>
+                <div class="metric-value fs-2 fw-bold text-success mt-1">{{ overall_pass_rate|default:0 }}%</div>
+                <small class="text-light opacity-50 metric-subtext">Meeting benchmark</small>
             </div>
         </div>
     </div>
 
-    <div class="row g-4 mb-4">
-        <div class="col-lg-6">
-            <div class="card-glass p-4 h-100">
-                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Subject Performance Comparison</h5>
-                <canvas id="subjectChart" style="max-height: 250px;"></canvas>
+    <div class="row g-3 g-md-4 mb-3 mb-md-4">
+        <div class="col-12 col-lg-6">
+            <div class="card-glass p-3 p-md-4 h-100">
+                <h5 class="fw-bold text-white mb-3 fs-6 fs-md-5"><i class="fa-solid fa-chart-column me-2 text-primary"></i>Subject Performance Comparison</h5>
+                <div style="position: relative; height: 220px; width: 100%;">
+                    <canvas id="subjectChart"></canvas>
+                </div>
             </div>
         </div>
 
-        <div class="col-lg-6">
-            <div class="card-glass p-4 h-100">
-                <h5 class="fw-bold text-white mb-3"><i class="fa-solid fa-chart-bar me-2 text-success"></i>Subject-Wise Unit Mastery Breakdown</h5>
-                <canvas id="unitChart" style="max-height: 250px;"></canvas>
+        <div class="col-12 col-lg-6">
+            <div class="card-glass p-3 p-md-4 h-100">
+                <h5 class="fw-bold text-white mb-3 fs-6 fs-md-5"><i class="fa-solid fa-chart-bar me-2 text-success"></i>Subject-Wise Unit Mastery Breakdown</h5>
+                <div style="position: relative; height: 220px; width: 100%;">
+                    <canvas id="unitChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- 4-QUADRANT SCATTER ANALYTICS CHART -->
-    <div class="row g-4 mb-4">
+    <div class="row g-3 g-md-4 mb-3 mb-md-4">
         <div class="col-12">
-            <div class="card-glass p-4">
-                <div class="d-flex justify-content-between align-items-center mb-3">
-                    <h5 class="fw-bold text-white mb-0">
+            <div class="card-glass p-3 p-md-4">
+                <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2 mb-3">
+                    <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5">
                         <i class="fa-solid fa-chart-line me-2 text-warning"></i>4-Quadrant Attendance vs Performance Analytics
                     </h5>
-                    <div class="d-flex gap-2">
+                    <div class="d-flex flex-wrap gap-1 gap-md-2">
                         <span class="badge bg-success opacity-75">High Att / High Marks</span>
                         <span class="badge bg-primary opacity-75">Low Att / High Marks</span>
                         <span class="badge bg-warning text-dark opacity-75">High Att / Low Marks</span>
                         <span class="badge bg-danger opacity-75">Low Att / Low Marks</span>
                     </div>
                 </div>
-                <canvas id="scatterChart" style="max-height: 280px;"></canvas>
+                <div style="position: relative; height: 250px; width: 100%;">
+                    <canvas id="scatterChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
 
-<div class="row g-4 mb-4">
-    <div class="col-lg-6">
-        <div class="card-glass p-4">
-            <h5 class="fw-bold text-warning mb-3"><i class="fa-solid fa-trophy me-2"></i>Top 5 Rankers</h5>
+<div class="row g-3 g-md-4 mb-3 mb-md-4">
+    <div class="col-12 col-lg-6">
+        <div class="card-glass p-3 p-md-4 h-100">
+            <h5 class="fw-bold text-warning mb-3 fs-6 fs-md-5"><i class="fa-solid fa-trophy me-2"></i>Top 5 Rankers</h5>
             <div class="table-responsive">
                 <table class="table table-dark-custom mb-0">
                     <thead>
@@ -747,7 +750,7 @@
                         <tr class="clickable-row" onclick="window.location='?student_id={{ top.student.id }}'">
                             <td><span class="badge bg-warning text-dark fw-bold">#{{ forloop.counter }}</span></td>
                             <td><strong>{{ top.student.roll_number }}</strong></td>
-                            <td>
+                            <td class="text-nowrap">
                                 {% if top.student.name %}
                                     {{ top.student.name|title }}
                                 {% elif top.student.user %}
@@ -768,9 +771,9 @@
         </div>
     </div>
 
-    <div class="col-lg-6">
-        <div class="card-glass p-4">
-            <h5 class="fw-bold text-danger mb-3"><i class="fa-solid fa-triangle-exclamation me-2"></i>Bottom 5 Remedial Intervention Roster</h5>
+    <div class="col-12 col-lg-6">
+        <div class="card-glass p-3 p-md-4 h-100">
+            <h5 class="fw-bold text-danger mb-3 fs-6 fs-md-5"><i class="fa-solid fa-triangle-exclamation me-2"></i>Bottom 5 Remedial Intervention Roster</h5>
             <div class="table-responsive">
                 <table class="table table-dark-custom mb-0">
                     <thead>
@@ -780,7 +783,7 @@
                         {% for bot in bottom_remedial_roster %}
                         <tr class="clickable-row" onclick="window.location='?student_id={{ bot.student.id }}'">
                             <td><strong>{{ bot.student.roll_number }}</strong></td>
-                            <td>
+                            <td class="text-nowrap">
                                 {% if bot.student.name %}
                                     {{ bot.student.name|title }}
                                 {% elif bot.student.user %}
@@ -808,25 +811,24 @@
     </div>
 </div>
 
-    <!-- Roster updated: includes Roll vs Rank toggle and full columns (Total Marks / Percentage / Grade / Pass-Fail) -->
-    <div class="card-glass p-4 mb-4">
-        <div class="d-flex justify-content-between align-items-center mb-3">
+    <!-- Complete Roster -->
+    <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-2 mb-3">
             <div>
-                <h5 class="fw-bold text-white mb-0"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
-                <div class="helper-line small better-contrast">💡 Click on any student row to inspect their full 360° Parent Dossier</div>
+                <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5"><i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster</h5>
+                <div class="helper-line small better-contrast mt-1 mb-0">💡 Click any row to inspect 360° Dossier</div>
             </div>
 
-            <!-- Segmented toggle: Roll vs Rank (balanced size) -->
-            <div class="no-print" role="group" aria-label="Sort Mode">
-              <div class="btn-segment">
+            <div class="no-print w-100 w-md-auto" role="group" aria-label="Sort Mode">
+              <div class="btn-segment w-100 justify-content-center justify-content-md-start">
                 <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll"
                    class="seg-btn {% if sort_mode == 'roll' or not sort_mode %}active{% endif %}">
-                   <i class="fa-solid fa-hashtag me-1"></i>Roll Number Order
+                   <i class="fa-solid fa-hashtag me-1"></i>Roll Order
                 </a>
                 <span class="seg-divider" aria-hidden="true"></span>
                 <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=rank"
                    class="seg-btn {% if sort_mode == 'rank' %}active{% endif %}">
-                   <i class="fa-solid fa-trophy me-1"></i>Ranking Order
+                   <i class="fa-solid fa-trophy me-1"></i>Rank Order
                 </a>
               </div>
             </div>
@@ -836,24 +838,24 @@
             <table class="table table-dark-custom">
                 <thead>
                     <tr class="text-muted">
-                        {% if sort_mode == 'rank' %}<th style="width:6%">Rank</th>{% endif %}
-                        <th style="width:12%">Roll No</th>
-                        <th style="width:22%">Name</th>
-                        <th style="width:16%">Total Marks</th>
-                        <th style="width:8%">Percentage</th>
-                        <th style="width:8%">Grade</th>
-                        <th style="width:8%">Result</th>
-                        <th style="width:8%">Attendance</th>
-                        <th style="width:10%">AI Risk</th>
-                        <th style="width:8%">Action</th>
+                        {% if sort_mode == 'rank' %}<th>Rank</th>{% endif %}
+                        <th>Roll No</th>
+                        <th>Name</th>
+                        <th>Total Marks</th>
+                        <th>Percentage</th>
+                        <th>Grade</th>
+                        <th>Result</th>
+                        <th>Attendance</th>
+                        <th>AI Risk</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in master_student_roster %}
                     <tr class="clickable-row" onclick="window.location='?student_id={{ item.student.id }}'">
                         {% if sort_mode == 'rank' %}<td>{{ item.rank }}</td>{% endif %}
-                        <td><strong>{{ item.roll_number }}</strong></td>
-                        <td>
+                        <td class="text-nowrap"><strong>{{ item.roll_number }}</strong></td>
+                        <td class="text-nowrap">
                             {% if item.name %}
                                 {{ item.name|title }}
                             {% elif item.student and item.student.user %}
@@ -862,7 +864,7 @@
                                 Student #{{ item.student.id }}
                             {% endif %}
                         </td>
-                        <td>
+                        <td class="text-nowrap">
                             {% if item.total_marks is not None and item.total_max is not None %}
                                 {{ item.total_marks }} / {{ item.total_max }}
                             {% elif item.total_marks is not None %}
@@ -878,20 +880,12 @@
                         <td><strong>
                             {% if item.percentage is not None %}{{ item.percentage }}%{% elif item.avg_marks is not None %}{{ item.avg_marks }}%{% else %}-{% endif %}
                         </strong></td>
-                        <td>
-                            <!-- FIX (requirement #4, grade centralization): this
-                                 used to have its own 4th inline grade scale
-                                 (90=A+/80=A/70=B+/...) as a fallback. item.grade
-                                 is now always populated server-side via
-                                 calculate_grade(), so the fallback scale is
-                                 removed entirely — one source of truth. -->
-                            {{ item.grade|default:"-" }}
-                        </td>
+                        <td>{{ item.grade|default:"-" }}</td>
                         <td>
                             {% if item.status == 'PASS' %}<span class="badge bg-success">PASS</span>{% else %}<span class="badge bg-danger">FAIL</span>{% endif %}
                         </td>
                         <td>{{ item.attendance|default:'-' }}%</td>
-                        <td>
+                        <td class="text-nowrap">
                             <span class="badge {% if item.badge == 'danger' or item.level == 'CRITICAL' %}bg-danger{% elif item.badge == 'warning' %}bg-warning text-dark{% else %}bg-success{% endif %}">
                                 {{ item.level|default:'STABLE' }} ({{ item.risk|default:0 }}%)
                             </span>
@@ -926,6 +920,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         plugins: { legend: { display: false } },
                         scales: {
                             y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9CA3AF' } },
@@ -951,6 +946,7 @@
                     },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         plugins: { legend: { display: false } },
                         scales: {
                             y: { beginAtZero: true, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#9CA3AF' } },
@@ -960,7 +956,7 @@
                 });
             }
 
-            // REQUIREMENT 3: Scatter Plot Color Duplicates Fix (legend: display: false)
+            // 3. Scatter Plot Analytics Chart
             const scatterElem = document.getElementById('scatterChart');
             if (scatterElem) {
                 const scatterQuads = {{ scatter_quadrants|default:"{}"|safe }};
@@ -974,17 +970,17 @@
 
                 if (qTopRight.length || qTopLeft.length || qBottomRight.length || qBottomLeft.length) {
                     datasets = [
-                        { label: 'High Att / High Marks', data: qTopRight, backgroundColor: '#10B981', pointRadius: 6 },
-                        { label: 'Low Att / High Marks', data: qTopLeft, backgroundColor: '#3B82F6', pointRadius: 6 },
-                        { label: 'High Att / Low Marks', data: qBottomRight, backgroundColor: '#F59E0B', pointRadius: 6 },
-                        { label: 'Low Att / Low Marks', data: qBottomLeft, backgroundColor: '#EF4444', pointRadius: 6 }
+                        { label: 'High Att / High Marks', data: qTopRight, backgroundColor: '#10B981', pointRadius: 5 },
+                        { label: 'Low Att / High Marks', data: qTopLeft, backgroundColor: '#3B82F6', pointRadius: 5 },
+                        { label: 'High Att / Low Marks', data: qBottomRight, backgroundColor: '#F59E0B', pointRadius: 5 },
+                        { label: 'Low Att / Low Marks', data: qBottomLeft, backgroundColor: '#EF4444', pointRadius: 5 }
                     ];
                 } else {
                     datasets = [{
                         label: 'Students',
                         data: rawScatter,
                         backgroundColor: '#3B82F6',
-                        pointRadius: 6
+                        pointRadius: 5
                     }];
                 }
 
@@ -993,8 +989,9 @@
                     data: { datasets: datasets },
                     options: {
                         responsive: true,
+                        maintainAspectRatio: false,
                         plugins: {
-                            legend: { display: false }, // Disables chart legend to prevent duplicate labels/colors
+                            legend: { display: false },
                             tooltip: {
                                 callbacks: {
                                     label: function(ctx) {
@@ -1027,7 +1024,7 @@
 
 </div>
 
-<!-- REQUIREMENT 4: Excel History & Batch Deletion Modal (updated: shows date-only "Uploaded On") -->
+<!-- Excel History Modal -->
 <div class="modal fade" id="batchHistoryModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark text-white border-secondary">
@@ -1081,7 +1078,7 @@
     </div>
 </div>
 
-<!-- MODAL: BULK 3-SHEET EXCEL UPLOAD (unchanged) -->
+<!-- Upload Excel Modal -->
 <div class="modal fade" id="uploadModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content bg-dark text-white border-secondary">
@@ -1112,6 +1109,7 @@
         </div>
     </div>
 </div>
+
 <script>
 async function exportDossierPDF() {
     const btn = document.getElementById('exportPdfBtn');
@@ -1129,10 +1127,8 @@ async function exportDossierPDF() {
         const source = document.getElementById('dossierContent') || document.querySelector('.container-fluid') || document.body;
         const clone = source.cloneNode(true);
 
-        // Strip out buttons, controls, and interactive elements entirely
         clone.querySelectorAll('.no-print, .btn, button, .modal, script, input, select, hr, a[href*="back"]').forEach(n => n.remove());
 
-        // Convert canvases to sharp images
         clone.querySelectorAll('canvas').forEach(c => {
             try {
                 const img = document.createElement('img');
@@ -1145,17 +1141,9 @@ async function exportDossierPDF() {
         const printWindow = window.open('', '_blank', 'width=1200,height=1000');
         if (!printWindow) throw new Error('Popup blocked');
 
-        // Fixed CSS: white-space set to normal so long text like AI Remedial Action Plan never clips or hides characters
         const printCSS = `
-            @page { 
-                size: A4 portrait; 
-                margin: 10mm; 
-            }
-            * { 
-                box-sizing: border-box; 
-                -webkit-print-color-adjust: exact !important; 
-                color-adjust: exact !important; 
-            }
+            @page { size: A4 portrait; margin: 10mm; }
+            * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; color-adjust: exact !important; }
             html, body {
                 background: #0b0f19 !important;
                 color: #f8fafc !important;
@@ -1167,129 +1155,25 @@ async function exportDossierPDF() {
                 height: auto !important;
                 overflow: visible !important;
             }
-            .exact-dashboard-wrapper {
-                width: 100% !important;
-                max-width: 100% !important;
-                background: #0b0f19 !important;
-                padding: 0 !important;
-                transform: none !important;
-            }
-            
-            /* Top Blue Student Banner */
+            .exact-dashboard-wrapper { width: 100% !important; max-width: 100% !important; background: #0b0f19 !important; padding: 0 !important; }
             .dossier-title-card, div[style*="background: linear-gradient"], .card:first-of-type, div[class*="bg-primary"], div[style*="background:#0b1220"] {
-                background: #2563eb !important;
-                color: #ffffff !important;
-                padding: 12px 16px !important;
-                border-radius: 8px !important;
-                margin-bottom: 12px !important;
-                break-inside: avoid;
+                background: #2563eb !important; color: #ffffff !important; padding: 12px 16px !important; border-radius: 8px !important; margin-bottom: 12px !important; break-inside: avoid;
             }
-            .dossier-title-card *, span, h4, p, div {
-                color: #ffffff !important;
-            }
-
-            /* 4 Metrics Side-by-Side Horizontal Row */
-            .row, .metrics-grid, div[class*="row"] {
-                display: flex !important;
-                flex-direction: row !important;
-                flex-wrap: nowrap !important;
-                gap: 10px !important;
-                margin-bottom: 12px !important;
-                align-items: stretch !important;
-                break-inside: avoid;
-            }
-            .col, [class*="col-"] {
-                flex: 1 !important;
-                width: 25% !important;
-                max-width: none !important;
-            }
-
-            /* Dark Dashboard Cards */
-            .card, .card-glass, div[class*="card"] {
-                background: #111827 !important;
-                border: 1px solid rgba(255,255,255,0.1) !important;
-                border-radius: 8px !important;
-                box-shadow: none !important;
-                padding: 10px 12px !important;
-                margin-bottom: 12px !important;
-                height: 100% !important;
-                break-inside: avoid;
-            }
-
-            /* Typography */
-            h2, h3, h4, h5, .display-4, .fs-3, .fs-4 { 
-                font-size: 10pt !important; 
-                font-weight: 700 !important; 
-                margin: 0 0 4px 0 !important; 
-                color: #ffffff !important; 
-            }
-            p, span, div {
-                color: #cbd5e1 !important;
-            }
-            .text-primary, [class*="text-"] {
-                color: #38bdf8 !important;
-                font-weight: 800 !important;
-            }
-
-            /* Tables Configuration - Fully visible text wrapping, preventing any data clipping */
-            table {
-                width: 100% !important;
-                max-width: 100% !important;
-                border-collapse: collapse !important;
-                margin-bottom: 12px !important;
-                background: #111827 !important;
-                break-inside: auto;
-            }
-            tr {
-                break-inside: avoid;
-                break-after: auto;
-            }
-            thead {
-                display: table-header-group;
-            }
-            th, td {
-                border: 1px solid rgba(255,255,255,0.15) !important;
-                padding: 6px 8px !important;
-                font-size: 7.5pt !important;
-                color: #f8fafc !important;
-                text-align: left;
-                background: #111827 !important;
-                word-break: normal !important;
-                overflow: visible !important;
-                white-space: normal !important;
-            }
-            th {
-                background-color: #1f2937 !important;
-                font-weight: 700 !important;
-                color: #ffffff !important;
-            }
-            
-            /* Status Badges */
-            .badge, span[class*="badge"], .pass-badge {
-                padding: 3px 6px !important;
-                font-size: 7pt !important;
-                font-weight: 700 !important;
-                border-radius: 4px !important;
-            }
-
-            /* Notice Box / AI Synthesizer */
-            .notice-box, .ai-terminal {
-                background: #111827 !important;
-                border: 1px solid rgba(255,255,255,0.15) !important;
-                color: #f8fafc !important;
-                padding: 10px 12px !important;
-                border-radius: 8px !important;
-                margin-top: 6px;
-                margin-bottom: 12px !important;
-                break-inside: avoid;
-            }
-            .notice-box p, .ai-terminal p, .ai-terminal li {
-                color: #e2e8f0 !important;
-                font-size: 8pt !important;
-                margin-bottom: 4px !important;
-                white-space: normal !important;
-            }
-
+            .dossier-title-card *, span, h4, p, div { color: #ffffff !important; }
+            .row, .metrics-grid, div[class*="row"] { display: flex !important; flex-direction: row !important; flex-wrap: nowrap !important; gap: 10px !important; margin-bottom: 12px !important; align-items: stretch !important; break-inside: avoid; }
+            .col, [class*="col-"] { flex: 1 !important; width: 25% !important; max-width: none !important; }
+            .card, .card-glass, div[class*="card"] { background: #111827 !important; border: 1px solid rgba(255,255,255,0.1) !important; border-radius: 8px !important; box-shadow: none !important; padding: 10px 12px !important; margin-bottom: 12px !important; height: 100% !important; break-inside: avoid; }
+            h2, h3, h4, h5, .display-4, .fs-3, .fs-4 { font-size: 10pt !important; font-weight: 700 !important; margin: 0 0 4px 0 !important; color: #ffffff !important; }
+            p, span, div { color: #cbd5e1 !important; }
+            .text-primary, [class*="text-"] { color: #38bdf8 !important; font-weight: 800 !important; }
+            table { width: 100% !important; max-width: 100% !important; border-collapse: collapse !important; margin-bottom: 12px !important; background: #111827 !important; break-inside: auto; }
+            tr { break-inside: avoid; break-after: auto; }
+            thead { display: table-header-group; }
+            th, td { border: 1px solid rgba(255,255,255,0.15) !important; padding: 6px 8px !important; font-size: 7.5pt !important; color: #f8fafc !important; text-align: left; background: #111827 !important; word-break: normal !important; overflow: visible !important; white-space: normal !important; }
+            th { background-color: #1f2937 !important; font-weight: 700 !important; color: #ffffff !important; }
+            .badge, span[class*="badge"], .pass-badge { padding: 3px 6px !important; font-size: 7pt !important; font-weight: 700 !important; border-radius: 4px !important; }
+            .notice-box, .ai-terminal { background: #111827 !important; border: 1px solid rgba(255,255,255,0.15) !important; color: #f8fafc !important; padding: 10px 12px !important; border-radius: 8px !important; margin-top: 6px; margin-bottom: 12px !important; break-inside: avoid; }
+            .notice-box p, .ai-terminal p, .ai-terminal li { color: #e2e8f0 !important; font-size: 8pt !important; margin-bottom: 4px !important; white-space: normal !important; }
             img { max-width: 100% !important; height: auto !important; }
             .no-print, ::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; }
         `;
