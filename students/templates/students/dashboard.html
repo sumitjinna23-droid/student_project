@@ -811,31 +811,37 @@
     </div>
 </div>
 
-    <!-- Complete Roster -->
+<!-- Complete Roster -->
 <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
-        <!-- Title & Helper Badge Inline -->
-        <div class="d-flex flex-wrap align-items-center gap-2">
-            <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5 d-inline-flex align-items-center">
+    <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
+        
+        <!-- Title & Subtitle Group (Forces inline side-by-side display) -->
+        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px; width: auto;">
+            <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5" style="display: inline-flex; align-items: center; white-space: nowrap; margin: 0;">
                 <i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster
             </h5>
-            <span class="helper-line small better-contrast m-0">💡 Click any row to inspect 360° Dossier</span>
+            <span class="helper-line small better-contrast" style="display: inline-block; white-space: nowrap; margin: 0;">
+                💡 Click any row to inspect 360° Dossier
+            </span>
         </div>
 
-        <!-- Sort Mode Toggle Buttons (Compact & Inline) -->
-        <div class="no-print" role="group" aria-label="Sort Mode">
-            <div class="btn-segment d-inline-flex align-items-center">
+        <!-- Sort Toggle Group (Forces compact, right-aligned width) -->
+        <div class="no-print" role="group" aria-label="Sort Mode" style="width: auto !important; max-width: max-content;">
+            <div class="btn-segment" style="display: inline-flex !important; width: auto !important; max-width: max-content !important;">
                 <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll"
-                   class="seg-btn {% if sort_mode == 'roll' or not sort_mode %}active{% endif %}">
+                   class="seg-btn {% if sort_mode == 'roll' or not sort_mode %}active{% endif %}"
+                   style="white-space: nowrap;">
                    <i class="fa-solid fa-hashtag me-1"></i>Roll Order
                 </a>
                 <span class="seg-divider" aria-hidden="true"></span>
                 <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=rank"
-                   class="seg-btn {% if sort_mode == 'rank' %}active{% endif %}">
+                   class="seg-btn {% if sort_mode == 'rank' %}active{% endif %}"
+                   style="white-space: nowrap;">
                    <i class="fa-solid fa-trophy me-1"></i>Rank Order
                 </a>
             </div>
         </div>
+
     </div>
 
         <div class="table-responsive mt-2">
