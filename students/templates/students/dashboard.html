@@ -774,16 +774,23 @@
     <div class="col-12 col-lg-6">
         <div class="card-glass p-3 p-md-4 h-100">
             <h5 class="fw-bold text-danger mb-3 fs-6 fs-md-5"><i class="fa-solid fa-triangle-exclamation me-2"></i>Bottom 5 Remedial Intervention Roster</h5>
-            <div class="table-responsive">
-                <table class="table table-dark-custom mb-0">
+            <div class="table-responsive" style="overflow-x: hidden; width: 100%;">
+                <table class="table table-dark-custom mb-0" style="table-layout: fixed; width: 100%;">
                     <thead>
-                        <tr class="text-white"><th>Roll No</th><th>Name</th><th>Class</th><th>Attendance</th><th>Failure Risk</th><th>Action Plan</th></tr>
+                        <tr class="text-white">
+                            <th style="width: 18%;">Roll No</th>
+                            <th style="width: 18%;">Name</th>
+                            <th style="width: 18%;">Class</th>
+                            <th style="width: 16%;">Attendance</th>
+                            <th style="width: 12%;">Failure Risk</th>
+                            <th style="width: 28%;">Action Plan</th>
+                        </tr>
                     </thead>
                     <tbody>
                         {% for bot in bottom_remedial_roster %}
                         <tr class="clickable-row" onclick="window.location='?student_id={{ bot.student.id }}'">
-                            <td><strong>{{ bot.student.roll_number }}</strong></td>
-                            <td class="text-nowrap">
+                            <td class="fw-bold">{{ bot.student.roll_number }}</td>
+                            <td style="white-space: normal; word-wrap: break-word;">
                                 {% if bot.student.name %}
                                     {{ bot.student.name|title }}
                                 {% elif bot.student.user %}
@@ -795,10 +802,8 @@
                             <td><span class="badge bg-secondary">{{ bot.student.get_year_display }}</span></td>
                             <td>{{ bot.attendance|default:0 }}%</td>
                             <td><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
-                            <td class="action-plan-cell">
-                              <div class="action-plan-scroll text-warning">
+                            <td style="white-space: normal; word-wrap: break-word; word-break: break-word; font-size: 0.85rem; color: #f59e0b;">
                                 {{ bot.remedial }}
-                              </div>
                             </td>
                         </tr>
                         {% empty %}
@@ -809,8 +814,7 @@
             </div>
         </div>
     </div>
-</div>
-
+    
 <!-- Complete Roster Header -->
 <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
