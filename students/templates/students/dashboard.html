@@ -789,8 +789,8 @@
                     <tbody>
                         {% for bot in bottom_remedial_roster %}
                         <tr class="clickable-row" onclick="window.location='?student_id={{ bot.student.id }}'">
-                            <td class="fw-bold">{{ bot.student.roll_number }}</td>
-                            <td style="white-space: normal; word-wrap: break-word;">
+                            <td class="fw-bold align-middle">{{ bot.student.roll_number }}</td>
+                            <td class="align-middle" style="white-space: normal; word-wrap: break-word;">
                                 {% if bot.student.name %}
                                     {{ bot.student.name|title }}
                                 {% elif bot.student.user %}
@@ -799,11 +799,13 @@
                                     Student #{{ bot.student.id }}
                                 {% endif %}
                             </td>
-                            <td><span class="badge bg-secondary">{{ bot.student.get_year_display }}</span></td>
-                            <td>{{ bot.attendance|default:0 }}%</td>
-                            <td><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
-                            <td style="white-space: normal; word-wrap: break-word; word-break: break-word; font-size: 0.85rem; color: #f59e0b;">
+                            <td class="align-middle"><span class="badge bg-secondary">{{ bot.student.get_year_display }}</span></td>
+                            <td class="align-middle">{{ bot.attendance|default:0 }}%</td>
+                            <td class="align-middle"><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
+                            <td class="align-middle">
+                              <div style="max-height: 80px; overflow-y: auto; font-size: 0.85rem; color: #f59e0b; padding-right: 4px;">
                                 {{ bot.remedial }}
+                              </div>
                             </td>
                         </tr>
                         {% empty %}

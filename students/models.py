@@ -611,3 +611,32 @@ class ExcelBatch(models.Model):
 # NOTE: Student account-provisioning signals (post_save/post_delete) live
 # in students/signals.py, consolidated alongside the AllowedTeacher-deletion
 # signal, so all signal handlers live in one place. See signals.py.
+
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+from django.contrib.auth.models import User
+
+# -------------------------------------------------------------
+# AUTOMATIC USER CLEANUP SIGNALS
+# -------------------------------------------------------------
+
+@receiver(post_delete, sender=StudentProfile)
+def cleanup_user_on_student_profile_delete(sender, instance, **kwargs):
+    """Deletes linked User when StudentProfile is deleted."""
+    if instance.user:
+        instance.user.delete()
+
+@receiver(post_delete, sender=Student)
+def cleanup_user_on_student_delete(sender, instance, **kwargs):
+    """Deletes linked User when Student is deleted."""
+    user = User.objects.filter(username__iexact=instance.roll_number).first()
+    if user:
+        user.delete()
+
+@receiver(post_delete, sender=AllowedTeacher)
+def cleanup_user_on_teacher_delete(sender, instance, **kwargs):
+    """Deletes linked User when AllowedTeacher is deleted."""
+    if instance.email:
+        user = User.objects.filter(email__iexact=instance.email).first()
+        if user:
+            user.delete()
