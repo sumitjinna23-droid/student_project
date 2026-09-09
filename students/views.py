@@ -375,7 +375,7 @@ def _destination_after_login(user, next_url=None):
 def custom_login(request):
     """
     Unified login for Email, Roll Number, or Admin Name.
-    Redirects first-time users immediately to setup if password is blank/not set.
+    Redirects to setup ONLY if the user has no password set yet.
     """
     if request.user.is_authenticated:
         dest = _destination_after_login(request.user, next_url=request.GET.get('next'))
@@ -401,8 +401,8 @@ def custom_login(request):
             if allowed_teacher:
                 existing_user = User.objects.filter(email__iexact=email).first()
 
-                # FIRST TIME SETUP: No user account, no password set, or empty password submitted
-                if not existing_user or not existing_user.has_usable_password() or not password_input:
+                # ONLY send to setup if user account is missing or has NO password set
+                if not existing_user or not existing_user.has_usable_password():
                     request.session['setup_email'] = email
                     request.session['setup_role'] = 'TEACHER'
                     if getattr(allowed_teacher, 'name', None):
@@ -410,7 +410,12 @@ def custom_login(request):
                     messages.info(request, "First time logging in? Set up your password below.")
                     return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
 
-                # EXISTING TEACHER: Verify password
+                # User has a password set — require password entry
+                if not password_input:
+                    messages.error(request, "Please enter your password.")
+                    return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+                # Verify password
                 auth_user = authenticate(request, username=existing_user.username, password=password_input)
                 if auth_user and auth_user.is_active:
                     login(request, auth_user)
@@ -433,8 +438,8 @@ def custom_login(request):
             profile = _get_profile_for_student(student)
             linked_user = profile.user if (profile and getattr(profile, 'user', None)) else User.objects.filter(username__iexact=student.roll_number).first()
 
-            # FIRST TIME SETUP: No password set OR user left password field empty
-            if not linked_user or not linked_user.has_usable_password() or not password_input:
+            # ONLY send to setup if user account is missing or has NO password set
+            if not linked_user or not linked_user.has_usable_password():
                 fallback_email = f"{student.roll_number.lower()}@college.local"
                 setup_email = linked_user.email if (linked_user and linked_user.email) else fallback_email
                 request.session['setup_email'] = setup_email
@@ -443,7 +448,12 @@ def custom_login(request):
                 messages.info(request, "First time logging in? Set up your password below.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={setup_email}&role=STUDENT&roll={student.roll_number}")
 
-            # EXISTING STUDENT: Verify password
+            # User has a password set — require password entry
+            if not password_input:
+                messages.error(request, "Please enter your password.")
+                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+            # Verify password
             auth_user = authenticate(request, username=linked_user.username, password=password_input)
             if auth_user and auth_user.is_active:
                 login(request, auth_user)
@@ -461,12 +471,18 @@ def custom_login(request):
         ).first()
 
         if admin_user:
-            if not admin_user.has_usable_password() or not password_input:
+            # ONLY send to setup if admin has NO password set
+            if not admin_user.has_usable_password():
                 admin_email = admin_user.email or f"{admin_user.username}@college.local"
                 request.session['setup_email'] = admin_email
                 request.session['setup_role'] = 'ADMIN'
                 messages.info(request, "First time logging in? Set up your password below.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={admin_email}&role=ADMIN")
+
+            # User has a password set — require password entry
+            if not password_input:
+                messages.error(request, "Please enter your password.")
+                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
             auth_user = authenticate(request, username=admin_user.username, password=password_input)
             if auth_user and auth_user.is_active:
