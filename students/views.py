@@ -378,7 +378,7 @@ from django.contrib import messages
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.models import User
 from django.db.models import Q
-from .models import AllowedTeacher, Student, StudentProfile
+from .models import AllowedTeacher, Student, UserProfile
 
 def custom_login(request):
     """

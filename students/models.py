@@ -576,10 +576,26 @@ class ExcelBatch(models.Model):
 
     def delete_associated_records(self):
         with transaction.atomic():
+            # 1. Fetch all students created in this batch
+            batch_students = Student.objects.filter(created_in_batch=self)
+
+            # 2. Explicitly remove associated User profiles and Django Users
+            for student in batch_students:
+                # Resolve linked UserProfile
+                profile = getattr(student, 'user_account', None)
+                user = profile.user if profile else User.objects.filter(username__iexact=student.roll_number).first()
+                
+                if profile:
+                    profile.delete()
+                if user:
+                    user.delete()
+
+            # 3. Clean up performance records and students
             Marks.objects.filter(excel_batch=self).delete()
             SubjectAttendance.objects.filter(excel_batch=self).delete()
-            Student.objects.filter(created_in_batch=self).delete()
+            batch_students.delete()
 
+            # 4. Remove physical file if present
             if self.file and os.path.isfile(self.file.path):
                 try:
                     os.remove(self.file.path)
@@ -587,26 +603,6 @@ class ExcelBatch(models.Model):
                     pass
 
             super().delete()
-
-    @property
-    def file_name(self):
-        return self.filename
-
-    @property
-    def year_scope(self):
-        return self.academic_year or ''
-
-    def delete(self, *args, **kwargs):
-        if self.file and os.path.isfile(self.file.path):
-            try:
-                os.remove(self.file.path)
-            except Exception:
-                pass
-        super().delete(*args, **kwargs)
-
-    def __str__(self):
-        return self.filename
-
 
 # NOTE: Student account-provisioning signals (post_save/post_delete) live
 # in students/signals.py, consolidated alongside the AllowedTeacher-deletion
@@ -616,27 +612,21 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 
-# -------------------------------------------------------------
-# AUTOMATIC USER CLEANUP SIGNALS
-# -------------------------------------------------------------
-
-@receiver(post_delete, sender=StudentProfile)
-def cleanup_user_on_student_profile_delete(sender, instance, **kwargs):
-    """Deletes linked User when StudentProfile is deleted."""
+@receiver(post_delete, sender='students.UserProfile')
+def cleanup_user_on_user_profile_delete(sender, instance, **kwargs):
     if instance.user:
         instance.user.delete()
 
-@receiver(post_delete, sender=Student)
+@receiver(post_delete, sender='students.Student')
 def cleanup_user_on_student_delete(sender, instance, **kwargs):
-    """Deletes linked User when Student is deleted."""
     user = User.objects.filter(username__iexact=instance.roll_number).first()
     if user:
         user.delete()
 
-@receiver(post_delete, sender=AllowedTeacher)
+@receiver(post_delete, sender='students.AllowedTeacher')
 def cleanup_user_on_teacher_delete(sender, instance, **kwargs):
-    """Deletes linked User when AllowedTeacher is deleted."""
     if instance.email:
         user = User.objects.filter(email__iexact=instance.email).first()
         if user:
             user.delete()
+
