@@ -811,21 +811,27 @@
     </div>
 </div>
 
-<!-- Complete Roster -->
+<!-- Complete Roster Header -->
 <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
         
-        <!-- Title & Subtitle Group (Forces inline side-by-side display) -->
-        <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px; width: auto;">
-            <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5" style="display: inline-flex; align-items: center; white-space: nowrap; margin: 0;">
-                <i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster
-            </h5>
-            <span class="helper-line small better-contrast" style="display: inline-block; white-space: nowrap; margin: 0;">
+        <!-- Title & Subtitle Group -->
+        <div style="display: flex; flex-direction: column; gap: 4px; width: auto;">
+            <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 10px;">
+                <h5 class="fw-bold text-white mb-0 fs-6 fs-md-5" style="display: inline-flex; align-items: center; white-space: nowrap; margin: 0;">
+                    <i class="fa-solid fa-users me-2 text-info"></i>Complete Student Roster
+                </h5>
+                <span class="helper-line small better-contrast d-none d-sm-inline-block" style="white-space: nowrap; margin: 0;">
+                    💡 Click any row to inspect 360° Dossier
+                </span>
+            </div>
+            <!-- Subtitle visible on mobile only -->
+            <span class="helper-line small better-contrast d-sm-none" style="margin-top: 2px;">
                 💡 Click any row to inspect 360° Dossier
             </span>
         </div>
 
-        <!-- Sort Toggle Group (Forces compact, right-aligned width) -->
+        <!-- Sort Toggle Group -->
         <div class="no-print" role="group" aria-label="Sort Mode" style="width: auto !important; max-width: max-content;">
             <div class="btn-segment" style="display: inline-flex !important; width: auto !important; max-width: max-content !important;">
                 <a href="?{% if selected_year %}year={{ selected_year }}&{% endif %}{% if selected_subject_id %}subject={{ selected_subject_id }}&{% endif %}{% if search_query %}search={{ search_query|urlencode }}&{% endif %}sort=roll"
