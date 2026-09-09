@@ -22,10 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-2y=-f98p66eww$s%+$d9j&c$v1#tdq2x4#^w#@$r=*0%n3yddy'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-2y=-f98p66eww$s%+$d9j&c$v1#tdq2x4#^w#@$r=*0%n3yddy')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
 
 # For local-network testing only. In production set explicit hostnames.
 ALLOWED_HOSTS = ['*']
@@ -40,9 +40,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
-    # Your apps
-    
 
     # 3rd party
     'import_export',
@@ -85,14 +82,24 @@ WSGI_APPLICATION = 'student_project.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-# SQLite is fine for local testing. For heavier loads use PostgreSQL.
-DATABASES = {
-    'default': dj_database_url.config(
-        default=os.environ.get('DATABASE_URL'),
-        conn_max_age=600,
-        ssl_require=True
-    )
-}
+# Uses SQLite as fallback when local, PostgreSQL with SSL when deployed on Render
+DATABASE_URL = os.environ.get('DATABASE_URL')
+
+if DATABASE_URL:
+    DATABASES = {
+        'default': dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=True
+        )
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 
 # Password validation
@@ -129,10 +136,19 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-# Use a leading slash for STATIC_URL (works both dev & production)
 STATIC_URL = '/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+
+# Prevents staticfiles.W004 warning if the static directory doesn't exist
+STATIC_DIR = BASE_DIR / 'static'
+if os.path.exists(STATIC_DIR):
+    STATICFILES_DIRS = [STATIC_DIR]
+else:
+    STATICFILES_DIRS = []
+
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')   # collectstatic target for production
+
+# Whitenoise storage for compressed static file serving
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # Media files configuration (for user uploads like Excel files)
 MEDIA_URL = '/media/'
@@ -165,8 +181,7 @@ SESSION_COOKIE_AGE = 60 * 60 * 24 * 7  # 1 week
 SESSION_SAVE_EVERY_REQUEST = True
 
 
-# Additional helpful defaults (development)
-# You can remove or tighten these for production
+# Additional helpful defaults
 CSRF_COOKIE_HTTPONLY = False
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = 'DENY'
