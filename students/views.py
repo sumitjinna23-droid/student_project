@@ -372,10 +372,11 @@ def _destination_after_login(user, next_url=None):
 # =========================================================
 # AUTHENTICATION & PASSWORD RESET VIEWS
 # =========================================================
-
 def custom_login(request):
     """
     Unified login for Email, Roll Number, or Admin Name.
+    Redirects first-time users directly to password setup,
+    and shows 'Wrong password' for returning users.
     """
     if request.user.is_authenticated:
         dest = _destination_after_login(request.user, next_url=request.GET.get('next'))
@@ -391,42 +392,41 @@ def custom_login(request):
             messages.error(request, "Enter Email, Roll Number, or Admin Name.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-        user = authenticate(request, username=identifier, password=password_input)
-        if user:
-            if not user.is_active:
-                messages.error(request, "Account is not active. Contact administrator.")
-                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
-
-            login(request, user)
-            dest = _destination_after_login(user, next_url=next_url)
-            return redirect(dest)
-
+        # -------------------------------------------------------------
+        # 1. TEACHER CHECK (By Email containing '@')
+        # -------------------------------------------------------------
         if '@' in identifier:
             email = identifier.strip().lower()
             allowed_teacher = AllowedTeacher.objects.filter(email__iexact=email).first()
 
             if allowed_teacher:
-                if not getattr(allowed_teacher, 'is_registered', False):
-                    request.session['setup_email'] = email
-                    request.session['setup_role'] = 'TEACHER'
-                    if getattr(allowed_teacher, 'name', None):
-                        request.session['setup_name'] = allowed_teacher.name
-                    messages.info(request, "Teacher found — set up your password to continue.")
-                    return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
-
                 existing_user = User.objects.filter(email__iexact=email).first()
-                if existing_user and existing_user.has_usable_password() and existing_user.is_active:
-                    messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
-                    return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
+                # Returning Teacher: Password exists
+                if existing_user and existing_user.has_usable_password() and existing_user.password:
+                    auth_user = authenticate(request, username=existing_user.username, password=password_input)
+                    if auth_user and auth_user.is_active:
+                        login(request, auth_user)
+                        dest = _destination_after_login(auth_user, next_url=next_url)
+                        return redirect(dest)
+                    else:
+                        messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
+                        return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+                # First-Time Teacher Setup
                 request.session['setup_email'] = email
                 request.session['setup_role'] = 'TEACHER'
-                messages.info(request, "Your account needs setup — continue to set a new password.")
+                if getattr(allowed_teacher, 'name', None):
+                    request.session['setup_name'] = allowed_teacher.name
+                messages.info(request, "First time logging in? Set up your password below.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
 
             messages.error(request, f"Access Denied: The email '{email}' is not registered. Contact admin.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
+        # -------------------------------------------------------------
+        # 2. STUDENT CHECK (By Roll Number)
+        # -------------------------------------------------------------
         roll_test = identifier.split('@')[0]
         student = Student.objects.filter(roll_number__iexact=roll_test).first()
 
@@ -438,44 +438,64 @@ def custom_login(request):
             else:
                 linked_user = User.objects.filter(username__iexact=student.roll_number).first()
 
-            if not linked_user or not linked_user.has_usable_password() or not linked_user.is_active:
-                fallback_email = f"{student.roll_number}@college.local"
-                request.session['setup_email'] = (linked_user.email if linked_user and linked_user.email else fallback_email)
+            # First-Time Student Setup: No usable password set yet
+            if not linked_user or not linked_user.has_usable_password() or not linked_user.password:
+                fallback_email = f"{student.roll_number.lower()}@college.local"
+                setup_email = linked_user.email if (linked_user and linked_user.email) else fallback_email
+                request.session['setup_email'] = setup_email
                 request.session['setup_role'] = 'STUDENT'
                 request.session['setup_roll'] = student.roll_number
-                messages.info(request, "Student account found — continue to set up your password.")
-                return redirect(f"{reverse('students:first_time_setup')}?email={request.session['setup_email']}&role=STUDENT&roll={student.roll_number}")
+                messages.info(request, "First time logging in? Set up your password below.")
+                return redirect(f"{reverse('students:first_time_setup')}?email={setup_email}&role=STUDENT&roll={student.roll_number}")
 
-            retry_user = authenticate(request, username=linked_user.username, password=password_input)
-            if retry_user and retry_user.is_active:
-                login(request, retry_user)
-                dest = _destination_after_login(retry_user, next_url=next_url)
+            # Returning Student: Password exists
+            auth_user = authenticate(request, username=linked_user.username, password=password_input)
+            if auth_user and auth_user.is_active:
+                login(request, auth_user)
+                dest = _destination_after_login(auth_user, next_url=next_url)
                 return redirect(dest)
+            else:
+                messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
+                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-            messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
-            return render(request, 'students/login.html', {'next': next_url} if next_url else {})
-
-        # Check if the identifier matches an existing user (Admin, Staff, or Teacher)
-        matched_user = User.objects.filter(
-            Q(username__iexact=identifier) | Q(email__iexact=identifier)
+        # -------------------------------------------------------------
+        # 3. ADMIN CHECK (By Admin Username / Name)
+        # -------------------------------------------------------------
+        admin_user = User.objects.filter(
+            Q(username__iexact=identifier) | Q(first_name__iexact=identifier)
         ).first()
 
-        # Check if input contains digits (typical format for Student Roll Numbers)
-        is_roll_number = any(char.isdigit() for char in identifier)
+        if admin_user:
+            # First-Time Admin Setup
+            if not admin_user.has_usable_password() or not admin_user.password:
+                admin_email = admin_user.email or f"{admin_user.username}@college.local"
+                request.session['setup_email'] = admin_email
+                request.session['setup_role'] = 'ADMIN'
+                messages.info(request, "First time logging in? Set up your password below.")
+                return redirect(f"{reverse('students:first_time_setup')}?email={admin_email}&role=ADMIN")
 
-        if matched_user:
-            messages.error(request, "Wrong password. Please try again.")
-        elif '@' in identifier:
-            messages.error(request, f"Access denied. User email '{identifier}' not found.")
-        elif is_roll_number:
+            # Returning Admin: Password exists
+            auth_user = authenticate(request, username=admin_user.username, password=password_input)
+            if auth_user and auth_user.is_active:
+                login(request, auth_user)
+                dest = _destination_after_login(auth_user, next_url=next_url)
+                return redirect(dest)
+            else:
+                messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
+                return render(request, 'students/login.html', {'next': next_url} if next_url else {})
+
+        # -------------------------------------------------------------
+        # 4. NOT FOUND FALLBACK MESSAGES
+        # -------------------------------------------------------------
+        is_roll_number = any(char.isdigit() for char in identifier)
+        if is_roll_number:
             messages.error(request, f"No student record found for Roll Number '{identifier}'. Please check the roll number or contact an administrator.")
         else:
-            messages.error(request, f"Access denied. Admin user '{identifier}' not found.")
+            messages.error(request, f"Access denied. Admin or user '{identifier}' not found in database.")
 
         return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
     return render(request, 'students/login.html', {'next': next_url} if next_url else {})
-
 
 def _get_profile_for_student(student):
     if not student:
