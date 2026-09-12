@@ -36,6 +36,67 @@ from .utils import (
 
 
 # =========================================================
+# CASE-INSENSITIVE / WHITESPACE-TOLERANT MATCHING HELPERS
+# =========================================================
+# Root cause of the recurring "/100 instead of the real max" and
+# "N/A instead of a real score" bugs: Excel imports matched subject
+# names (and student identifiers) with plain, case-sensitive equality
+# (Subject.objects.get_or_create(name=subj_name), dict lookups keyed by
+# the raw name, etc.). "WEB SERVICE" in one sheet and "Web Service" —
+# or even "WEB SERVICE " with a trailing space — in another sheet were
+# treated as two DIFFERENT subjects. Whichever one got created second
+# via a bare get_or_create/create() picked up Django's model defaults
+# (total_max_marks=100.0, every max_*_marks=0.0) instead of the real
+# configured values, and Marks rows silently attached to that blank
+# duplicate. These helpers are the single, shared source of truth for
+# that matching logic across every import path in this file.
+
+def _normalize_key(value):
+    """Collapse whitespace, strip, and casefold — used only to COMPARE
+    text for equality, never to store or display it."""
+    return re.sub(r'\s+', ' ', str(value or '').strip()).casefold()
+
+
+def get_or_create_subject_ci(name):
+    """Case-insensitive, whitespace-normalized get-or-create for Subject,
+    matched on name. Reuses an existing row regardless of case or stray
+    spaces instead of silently creating a blank duplicate."""
+    clean_name = re.sub(r'\s+', ' ', str(name or '').strip())
+    if not clean_name:
+        return None
+    subject = Subject.objects.filter(name__iexact=clean_name).first()
+    if subject is None:
+        subject = Subject.objects.create(name=clean_name)
+    return subject
+
+
+def get_or_create_student_ci(roll_number, display_name=None, extra_defaults=None, update_existing_name=True):
+    """Case-insensitive, whitespace-normalized get-or-create for Student,
+    matched on roll_number. Also normalizes the stored name's whitespace
+    and only rewrites it when it's genuinely different (not just a case
+    variant), so re-uploads don't keep "changing" a name that's really
+    the same student. Pass update_existing_name=False when display_name
+    is a synthesized placeholder (e.g. an attendance-only sheet with no
+    real name column) rather than actual sheet data, so it never
+    overwrites a real name already on file."""
+    clean_roll = re.sub(r'\s+', ' ', str(roll_number or '').strip())
+    clean_name = re.sub(r'\s+', ' ', str(display_name or '').strip())
+    student = Student.objects.filter(roll_number__iexact=clean_roll).first()
+    created = False
+    if student is None:
+        defaults = {'name': clean_name or clean_roll}
+        if extra_defaults:
+            defaults.update(extra_defaults)
+        student = Student.objects.create(roll_number=clean_roll, **defaults)
+        created = True
+    elif update_existing_name and clean_name and _normalize_key(student.name) != _normalize_key(clean_name):
+        student.name = clean_name
+        student.save()
+    return student, created
+
+
+
+# =========================================================
 # DYNAMIC AI PERFORMANCE ANALYSIS HELPER
 # =========================================================
 
@@ -383,8 +444,8 @@ from .models import AllowedTeacher, Student, UserProfile
 def custom_login(request):
     """
     Unified login logic:
-    - If user has NO password set in DB -> Redirects directly to setup page.
-    - If user HAS a password set in DB -> Requires entering and validating the password.
+    - If user has NO password set in DB (or is logging in for the first time without entering a password) -> Setup Page.
+    - If user HAS a password set in DB -> Standard validation & direct dashboard login.
     """
     if request.user.is_authenticated:
         dest = _destination_after_login(request.user, next_url=request.GET.get('next'))
@@ -397,7 +458,7 @@ def custom_login(request):
         password_input = request.POST.get('password', '').strip()
 
         if not identifier:
-            messages.error(request, "Enter Email, Roll Number, or Admin Name.")
+            messages.error(request, "Please enter your Email, Roll Number, or Admin Name.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
         # -------------------------------------------------------------
@@ -410,20 +471,24 @@ def custom_login(request):
             if allowed_teacher:
                 existing_user = User.objects.filter(email__iexact=email).first()
 
-                # NO USER ACCOUNT OR NO USABLE PASSWORD -> DIRECT TO SETUP
-                if not existing_user or not existing_user.has_usable_password():
+                # Check if user has a set/usable password
+                has_password = existing_user and existing_user.has_usable_password() and existing_user.password != ""
+
+                # FIRST-TIME USER: no account yet, or no usable password AND no password entered
+                if not existing_user or (not has_password and not password_input):
                     request.session['setup_email'] = email
                     request.session['setup_role'] = 'TEACHER'
                     if getattr(allowed_teacher, 'name', None):
                         request.session['setup_name'] = allowed_teacher.name
-                    messages.info(request, "First time logging in? Set up your password below.")
+                    messages.info(request, "First-time login detected. Please set up your password below.")
                     return redirect(f"{reverse('students:first_time_setup')}?email={email}&role=TEACHER")
 
-                # PASSWORD EXISTS IN DB -> REQUIRE PASSWORD
-                if not password_input:
+                # RETURNING USER: password already exists, but the field was left empty
+                if has_password and not password_input:
                     messages.error(request, "Please enter your password.")
                     return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
+                # RETURNING USER: password entered -> VALIDATE
                 auth_user = authenticate(request, username=existing_user.username, password=password_input)
                 if auth_user and auth_user.is_active:
                     login(request, auth_user)
@@ -432,7 +497,7 @@ def custom_login(request):
                     messages.error(request, "Wrong password. Please try again or use 'Forgot Password'.")
                     return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
-            messages.error(request, f"Access Denied: Email '{email}' is not registered.")
+            messages.error(request, f"Access denied. User '{identifier}' not found in database.")
             return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
         # -------------------------------------------------------------
@@ -445,21 +510,25 @@ def custom_login(request):
             profile = _get_profile_for_student(student)
             linked_user = profile.user if (profile and getattr(profile, 'user', None)) else User.objects.filter(username__iexact=student.roll_number).first()
 
-            # NO USER ACCOUNT OR NO USABLE PASSWORD -> DIRECT TO SETUP
-            if not linked_user or not linked_user.has_usable_password():
+            # Check if user account and valid password exist
+            has_password = linked_user and linked_user.has_usable_password() and linked_user.password != ""
+
+            # FIRST-TIME USER: no account yet, or no usable password AND no password entered
+            if not linked_user or (not has_password and not password_input):
                 fallback_email = f"{student.roll_number.lower()}@college.local"
                 setup_email = linked_user.email if (linked_user and linked_user.email) else fallback_email
                 request.session['setup_email'] = setup_email
                 request.session['setup_role'] = 'STUDENT'
                 request.session['setup_roll'] = student.roll_number
-                messages.info(request, "First time logging in? Set up your password below.")
+                messages.info(request, "First-time login detected. Please set up your password below.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={setup_email}&role=STUDENT&roll={student.roll_number}")
 
-            # PASSWORD EXISTS IN DB -> REQUIRE PASSWORD
-            if not password_input:
+            # RETURNING USER: password already exists, but the field was left empty
+            if has_password and not password_input:
                 messages.error(request, "Please enter your password.")
                 return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
+            # RETURNING USER: password entered -> VALIDATE
             auth_user = authenticate(request, username=linked_user.username, password=password_input)
             if auth_user and auth_user.is_active:
                 login(request, auth_user)
@@ -476,19 +545,22 @@ def custom_login(request):
         ).first()
 
         if admin_user:
-            # NO USABLE PASSWORD -> DIRECT TO SETUP
-            if not admin_user.has_usable_password():
+            has_password = admin_user.has_usable_password() and admin_user.password != ""
+
+            # FIRST-TIME USER: no usable password AND no password entered
+            if not has_password and not password_input:
                 admin_email = admin_user.email or f"{admin_user.username}@college.local"
                 request.session['setup_email'] = admin_email
                 request.session['setup_role'] = 'ADMIN'
-                messages.info(request, "First time logging in? Set up your password below.")
+                messages.info(request, "First-time login detected. Please set up your password below.")
                 return redirect(f"{reverse('students:first_time_setup')}?email={admin_email}&role=ADMIN")
 
-            # PASSWORD EXISTS IN DB -> REQUIRE PASSWORD
-            if not password_input:
+            # RETURNING USER: password already exists, but the field was left empty
+            if has_password and not password_input:
                 messages.error(request, "Please enter your password.")
                 return render(request, 'students/login.html', {'next': next_url} if next_url else {})
 
+            # RETURNING USER: password entered -> VALIDATE
             auth_user = authenticate(request, username=admin_user.username, password=password_input)
             if auth_user and auth_user.is_active:
                 login(request, auth_user)
@@ -865,15 +937,17 @@ def analytics_dashboard(request):
         messages.warning(request, "Access restricted. You have been redirected to your student portal.")
         return redirect('students:student_dashboard')
 
+    # Inside analytics_dashboard view:
     if request.method == 'POST' and request.FILES.get('excel_file'):
         uploaded_file = request.FILES['excel_file']
 
         try:
             excel_batch = ExcelBatch.objects.create(
-                filename=uploaded_file.name,
-                academic_year=request.POST.get('year', 'General'),
-                uploaded_by=request.user if request.user.is_authenticated else None
-            )
+            filename=uploaded_file.name,  # Explicitly store file name
+            file=uploaded_file,           # Store the actual file reference
+            academic_year=request.POST.get('year', 'General'),
+            uploaded_by=request.user if request.user.is_authenticated else None
+        )
 
             if uploaded_file.name.endswith('.csv'):
                 df = pd.read_csv(uploaded_file)
@@ -891,13 +965,24 @@ def analytics_dashboard(request):
                         if not roll or roll.lower() == 'nan':
                             continue
 
-                        student_obj, created = Student.objects.get_or_create(
-                            roll_number=roll,
-                            defaults={'name': f"Student {roll}", 'created_in_batch': excel_batch}
+                        # FIX: case-insensitive/whitespace-normalized match
+                        # (see get_or_create_student_ci() above) instead of
+                        # an exact roll_number match. update_existing_name=False
+                        # because "Student {roll}" is a placeholder for this
+                        # attendance-only sheet, not real sheet data — must
+                        # never overwrite a real name already on file.
+                        student_obj, created = get_or_create_student_ci(
+                            roll, f"Student {roll}",
+                            extra_defaults={'created_in_batch': excel_batch},
+                            update_existing_name=False,
                         )
 
                         subj_name = str(row['Subject']).strip()
-                        subject_obj, _ = Subject.objects.get_or_create(name=subj_name)
+                        # FIX: case-insensitive/whitespace-normalized match
+                        # (see get_or_create_subject_ci() above) instead of
+                        # an exact name match that could create a blank
+                        # duplicate subject for a differently-cased entry.
+                        subject_obj = get_or_create_subject_ci(subj_name)
 
                         SubjectAttendance.objects.update_or_create(
                             student=student_obj,
@@ -947,14 +1032,13 @@ def analytics_dashboard(request):
                         digits = re.findall(r'\d+', str(row['semester']))
                         sem_val = int(digits[0]) if digits else 1
 
-                    student_obj, created = Student.objects.get_or_create(
-                        roll_number=roll,
-                        defaults={'name': name, 'created_in_batch': excel_batch}
+                    # FIX: case-insensitive/whitespace-normalized match
+                    # instead of an exact roll_number match + case-sensitive
+                    # name-change check (see get_or_create_student_ci()
+                    # above).
+                    student_obj, created = get_or_create_student_ci(
+                        roll, name, extra_defaults={'created_in_batch': excel_batch}
                     )
-
-                    if not created and student_obj.name != name:
-                        student_obj.name = name
-                        student_obj.save()
 
                     u1 = clean_val(row.get('unit_1_marks') if 'unit_1_marks' in row else row.get('Unit 1'))
                     u2 = clean_val(row.get('unit_2_marks') if 'unit_2_marks' in row else row.get('Unit 2'))
@@ -975,21 +1059,34 @@ def analytics_dashboard(request):
                     else:
                         sub_type = 'THEORY'
 
-                    max_theory = clean_val(row.get('max_theory_marks', row.get('Theory Max'))) or (50.0 if any(x is not None for x in [u1, u2, u3, u4]) else 0.0)
-                    max_pract = clean_val(row.get('max_practical_marks', row.get('Practical Max'))) or (50.0 if (practical is not None and max_theory == 0) else (25.0 if practical is not None else 0.0))
-                    max_int = clean_val(row.get('max_internal_marks', row.get('Internal Max'))) or (10.0 if internal is not None else 0.0)
-                    max_ass = clean_val(row.get('max_assignment_marks', row.get('Assignment Max'))) or (15.0 if assignment is not None else 0.0)
+                    # FIX: previously guessed made-up maxima (50.0 / 25.0 /
+                    # 10.0 / 15.0) whenever a max_*_marks column wasn't
+                    # present, purely based on whether a score existed for
+                    # that component. That's the same class of bug as the
+                    # hardcoded "/100" — inventing a plausible-looking
+                    # number instead of using real configured data. Default
+                    # to 0.0 (== "not configured") like every other import
+                    # path in this file; Subject.computed_total_max already
+                    # handles an honest fallback when nothing is configured.
+                    max_theory = clean_val(row.get('max_theory_marks', row.get('Theory Max'))) or 0.0
+                    max_pract = clean_val(row.get('max_practical_marks', row.get('Practical Max'))) or 0.0
+                    max_int = clean_val(row.get('max_internal_marks', row.get('Internal Max'))) or 0.0
+                    max_ass = clean_val(row.get('max_assignment_marks', row.get('Assignment Max'))) or 0.0
 
-                    subject_obj, _ = Subject.objects.get_or_create(
-                        name=sub_name,
-                        defaults={
-                            'subject_type': sub_type,
-                            'max_theory_marks': max_theory,
-                            'max_practical_marks': max_pract,
-                            'max_internal_marks': max_int,
-                            'max_assignment_marks': max_ass,
-                        }
-                    )
+                    # FIX: case-insensitive/whitespace-normalized match
+                    # (see get_or_create_subject_ci() above) instead of an
+                    # exact name match. Also now updates an existing
+                    # subject's config on every upload (previously
+                    # `defaults=` only applied on first creation, so a
+                    # subject's maxima could never be corrected via this
+                    # import path once created).
+                    subject_obj = get_or_create_subject_ci(sub_name)
+                    subject_obj.subject_type = sub_type
+                    subject_obj.max_theory_marks = max_theory
+                    subject_obj.max_practical_marks = max_pract
+                    subject_obj.max_internal_marks = max_int
+                    subject_obj.max_assignment_marks = max_ass
+                    subject_obj.save()
 
                     Marks.objects.update_or_create(
                         student=student_obj,
@@ -1316,19 +1413,24 @@ def analytics_dashboard(request):
                         pass
             total_marks += m_total
 
+            # FIX (hardcoded /100 denominator bug): this used to read
+            # subj.total_max_marks FIRST (a field that defaults to 100.0
+            # whenever a teacher hasn't explicitly set it) and only fell
+            # back to summing the component maxima (unit_1_max..unit_4_max,
+            # max_internal_marks, etc.) if total_max_marks was falsy. That
+            # meant a subject with real component maxima summing to, say,
+            # 150 but an unset/default total_max_marks would silently be
+            # treated as "out of 100" here — producing exactly the reported
+            # "84.0 / 100" (incorrect 56% off the wrong denominator)
+            # instead of "84.0 / 150" symptom. This duplicated (and
+            # inverted) the priority order of the single source of truth
+            # for a subject's max marks: Subject.computed_total_max
+            # (component sum first, total_max_marks only as the fallback
+            # when no components are set). Delegate to that property
+            # instead of re-deriving it here so this can never diverge
+            # again.
             subj = getattr(m, 'subject', None)
-            subj_max = 0.0
-            if subj:
-                subj_max = float(getattr(subj, 'total_max_marks', 0) or 0)
-                if not subj_max:
-                    subj_max += float(getattr(subj, 'unit_1_max', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_2_max', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_3_max', 0) or 0)
-                    subj_max += float(getattr(subj, 'unit_4_max', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_internal_marks', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_practical_marks', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_assignment_marks', 0) or 0)
-                    subj_max += float(getattr(subj, 'max_presentation_marks', 0) or 0)
+            subj_max = float(subj.computed_total_max) if subj else 0.0
             total_max += subj_max
 
         if total_max and total_max > 0:
@@ -1430,65 +1532,184 @@ def upload_excel_view(request):
                 messages.error(request, "Uploaded file must contain at least 3 sheets/tabs.")
                 return redirect('students:upload_excel')
 
+            # Inside upload_excel_view:
             with transaction.atomic():
                 excel_batch = ExcelBatch.objects.create(
-                    filename=file_name,
-                    uploaded_by=request.user if request.user.is_authenticated else None
+                filename=file_name,
+                file=excel_file,  # Explicitly assign file reference
+                uploaded_by=request.user if request.user.is_authenticated else None
                 )
 
-                def get_num(row, col, default=0.0):
-                    val = row.get(col)
-                    return float(val) if pd.notna(val) else default
+                # FIX (column-matching robustness — root cause of the
+                # "/100 instead of /50" and "N/A instead of actual score"
+                # bugs): row.get('Practical Max') / row.get('Practical')
+                # etc. require an EXACT, case-sensitive, whitespace-exact
+                # match against the Excel header. A real-world header like
+                # "practical max", "Practical  Max", "Practical_Max", or a
+                # synonym like "Max Practical Marks" silently failed this
+                # exact match and returned None/NaN — which get_num then
+                # turned into 0.0. For a PRACTICAL subject like "WEB
+                # SERVICE" that means max_practical_marks (and the
+                # student's practical_marks score) silently dropped to
+                # 0/None even though the sheet had the real value (50 /
+                # 22). With every component max at 0, Subject.computed_total_max
+                # falls through to its 100.0 last-resort fallback — that's
+                # where the hardcoded-looking "/100" was actually coming
+                # from (see the fallback comment on that property).
+                #
+                # _resolve_column() normalizes headers (case, whitespace,
+                # underscores/hyphens all folded away) and accepts a list
+                # of accepted spellings per field, so "Practical Max",
+                # "practical_max", "Max Practical Marks" etc. all resolve
+                # to the same value instead of silently returning None.
+                def _normalize_header(name):
+                    return re.sub(r'[\s_\-]+', '', str(name).strip().lower())
+
+                def _make_column_resolver(df):
+                    header_map = {_normalize_header(c): c for c in df.columns}
+
+                    def resolve(row, *candidate_names):
+                        for candidate in candidate_names:
+                            actual_col = header_map.get(_normalize_header(candidate))
+                            if actual_col is not None:
+                                val = row.get(actual_col)
+                                if pd.notna(val):
+                                    return val
+                        return None
+                    return resolve
+
+                def resolve_num(row, resolver, *candidate_names, default=0.0):
+                    val = resolver(row, *candidate_names)
+                    if val is None:
+                        return default
+                    try:
+                        return float(val)
+                    except (TypeError, ValueError):
+                        return default
 
                 df_subjects = pd.read_excel(xls, sheet_names[0])
+                resolve_subj = _make_column_resolver(df_subjects)
+                subjects_missing_maxima = []
+
                 for _, row in df_subjects.iterrows():
-                    subj_name = str(row.get('Subject Name', '')).strip()
-                    if not subj_name or pd.isna(subj_name):
+                    subj_name = str(resolve_subj(row, 'Subject Name') or '').strip()
+                    if not subj_name or subj_name.lower() == 'nan':
                         continue
 
-                    subject, _ = Subject.objects.get_or_create(name=subj_name)
-                    subject.subject_type = str(row.get('Subject Type', 'THEORY')).strip().upper()
+                    # FIX: was Subject.objects.get_or_create(name=subj_name)
+                    # — an exact, case-sensitive match. "WEB SERVICE" here
+                    # and "Web Service" (or a stray trailing space) anywhere
+                    # else created a second, blank Subject row instead of
+                    # reusing this one. See get_or_create_subject_ci() above.
+                    subject = get_or_create_subject_ci(subj_name)
+                    subject.subject_type = str(
+                        resolve_subj(row, 'Subject Type', 'Type') or 'THEORY'
+                    ).strip().upper()
 
-                    subject.total_max_marks = get_num(row, 'Total Marks', 100.0)
-                    subject.max_theory_marks = get_num(row, 'Theory Max', 0.0)
-                    subject.max_practical_marks = get_num(row, 'Practical Max', 0.0)
-                    subject.max_internal_marks = get_num(row, 'Internal Max', 0.0)
-                    subject.max_assignment_marks = get_num(row, 'Assignment Max', 0.0)
-                    subject.max_presentation_marks = get_num(row, 'Presentation Max', 0.0)
+                    # FIX: 'Total Marks Max' is this sheet's actual column
+                    # name and is now the primary alias (previous aliases
+                    # kept only for backward compatibility with older
+                    # sheets that used a different header).
+                    subject.total_max_marks = resolve_num(
+                        row, resolve_subj,
+                        'Total Marks Max', 'Total Marks', 'Total Max Marks', 'Total Max', 'Max Marks'
+                    )
+                    subject.max_theory_marks = resolve_num(
+                        row, resolve_subj, 'Theory Max', 'Max Theory Marks'
+                    )
+                    subject.max_practical_marks = resolve_num(
+                        row, resolve_subj, 'Practical Max', 'Max Practical Marks'
+                    )
+                    subject.max_internal_marks = resolve_num(
+                        row, resolve_subj, 'Internal Max', 'Max Internal Marks'
+                    )
+                    subject.max_assignment_marks = resolve_num(
+                        row, resolve_subj, 'Assignment Max', 'Max Assignment Marks'
+                    )
+                    subject.max_presentation_marks = resolve_num(
+                        row, resolve_subj, 'Presentation Max', 'Max Presentation Marks'
+                    )
 
-                    subject.unit_1_max = get_num(row, 'Unit 1 Max', 0.0)
-                    subject.unit_2_max = get_num(row, 'Unit 2 Max', 0.0)
-                    subject.unit_3_max = get_num(row, 'Unit 3 Max', 0.0)
-                    subject.unit_4_max = get_num(row, 'Unit 4 Max', 0.0)
+                    subject.unit_1_max = resolve_num(row, resolve_subj, 'Unit 1 Max', 'Unit1 Max')
+                    subject.unit_2_max = resolve_num(row, resolve_subj, 'Unit 2 Max', 'Unit2 Max')
+                    subject.unit_3_max = resolve_num(row, resolve_subj, 'Unit 3 Max', 'Unit3 Max')
+                    subject.unit_4_max = resolve_num(row, resolve_subj, 'Unit 4 Max', 'Unit4 Max')
                     subject.save()
 
-                subject_lookup = {s.name: s for s in Subject.objects.all()}
+                    # Surface a warning instead of silently falling back to
+                    # a guessed 100 — if a subject genuinely has no maxima
+                    # captured from any recognized column, computed_total_max
+                    # will use its last-resort default and the admin should
+                    # know that happened.
+                    if subject.computed_total_max == 100.0 and not any([
+                        subject.max_theory_marks, subject.max_practical_marks,
+                        subject.max_internal_marks, subject.max_assignment_marks,
+                        subject.max_presentation_marks, subject.total_max_marks,
+                    ]):
+                        subjects_missing_maxima.append(subj_name)
+
+                if subjects_missing_maxima:
+                    messages.warning(
+                        request,
+                        "No max-marks columns were recognized for: " +
+                        ", ".join(sorted(set(subjects_missing_maxima))) +
+                        ". These subjects are showing a default 100 denominator — "
+                        "check the Subjects sheet column headers for these rows."
+                    )
+
+                # FIX: keyed by exact subject.name before — "web service"
+                # (any case/whitespace variant from the Marks sheet) would
+                # miss this dict entirely and fall through to
+                # Subject.objects.create(name=subj_name) below, creating a
+                # second, blank-defaults Subject. Now keyed by the same
+                # normalized form get_or_create_subject_ci() matches on.
+                subject_lookup = {_normalize_key(s.name): s for s in Subject.objects.all()}
 
                 df_marks = pd.read_excel(xls, sheet_names[1])
+                resolve_marks = _make_column_resolver(df_marks)
+
                 for _, row in df_marks.iterrows():
-                    roll = str(row.get('Roll Number', '')).strip()
-                    subj_name = str(row.get('Subject Name', '')).strip()
-                    if not roll or not subj_name or pd.isna(roll) or pd.isna(subj_name):
+                    roll = str(resolve_marks(row, 'Roll Number', 'Roll No') or '').strip()
+                    subj_name = str(resolve_marks(row, 'Subject Name', 'Subject') or '').strip()
+                    if not roll or not subj_name or roll.lower() == 'nan' or subj_name.lower() == 'nan':
                         continue
 
-                    student_name = str(row.get('Student Name', '')).strip()
+                    student_name = str(resolve_marks(row, 'Student Name', 'Name') or '').strip()
 
-                    student, created = Student.objects.get_or_create(
-                        roll_number=roll,
-                        defaults={'name': student_name or roll, 'created_in_batch': excel_batch}
+                    # FIX: was Student.objects.get_or_create(roll_number=roll)
+                    # — exact, case-sensitive match on roll number, plus a
+                    # case-sensitive name-change check. See
+                    # get_or_create_student_ci() above.
+                    student, created = get_or_create_student_ci(
+                        roll, student_name, extra_defaults={'created_in_batch': excel_batch}
                     )
-                    if not created and student.name != student_name and student_name:
-                        student.name = student_name
-                        student.save()
 
-                    subject = subject_lookup.get(subj_name)
+                    # FIX: was subject_lookup.get(subj_name) (exact key) with
+                    # a bare Subject.objects.create(name=subj_name) fallback
+                    # — the exact mechanism that created a blank duplicate
+                    # "Web Service" (Django defaults: total_max_marks=100.0,
+                    # every max_*_marks=0.0) whenever this sheet's spelling
+                    # didn't byte-for-byte match the Subjects sheet's. Now
+                    # resolved the same case/whitespace-normalized way, so a
+                    # Marks row always attaches to the one real, correctly
+                    # configured Subject.
+                    norm_subj_key = _normalize_key(subj_name)
+                    subject = subject_lookup.get(norm_subj_key)
                     if not subject:
-                        subject = Subject.objects.create(name=subj_name)
-                        subject_lookup[subj_name] = subject
+                        subject = get_or_create_subject_ci(subj_name)
+                        subject_lookup[norm_subj_key] = subject
 
-                    def get_validated_mark(col, max_val):
-                        val = row.get(col)
-                        if pd.notna(val) and str(val).strip() != '':
+                    # FIX: was row.get(col) — an exact, case-sensitive
+                    # header match. Same root cause as the Subjects-sheet
+                    # bug above: a header like "Practical Marks" or
+                    # "practical" instead of exactly "Practical" made this
+                    # silently return None, which the breakdown table then
+                    # rendered as "N/A" even though the student had a real
+                    # score in the sheet. Now resolved the same
+                    # case/whitespace-tolerant, alias-aware way.
+                    def get_validated_mark(*candidate_names, max_val):
+                        val = resolve_marks(row, *candidate_names)
+                        if val is not None and str(val).strip() != '':
                             try:
                                 num = float(val)
                                 # Cap excess scores automatically instead of raising an error
@@ -1499,16 +1720,17 @@ def upload_excel_view(request):
                                 return None
                         return None
 
-                    u1_m = getattr(subject, 'unit_1_max', 0) or getattr(subject, 'max_unit_1', 0) or 0
-                    u2_m = getattr(subject, 'unit_2_max', 0) or getattr(subject, 'max_unit_2', 0) or 0
-                    u3_m = getattr(subject, 'unit_3_max', 0) or getattr(subject, 'max_unit_3', 0) or 0
-                    u4_m = getattr(subject, 'unit_4_max', 0) or getattr(subject, 'max_unit_4', 0) or 0
+                    u1_m = getattr(subject, 'unit_1_max', 0) or 0
+                    u2_m = getattr(subject, 'unit_2_max', 0) or 0
+                    u3_m = getattr(subject, 'unit_3_max', 0) or 0
+                    u4_m = getattr(subject, 'unit_4_max', 0) or 0
                     pr_m = getattr(subject, 'max_practical_marks', 0) or 0
                     int_m = getattr(subject, 'max_internal_marks', 0) or 0
                     ass_m = getattr(subject, 'max_assignment_marks', 0) or 0
                     pres_m = getattr(subject, 'max_presentation_marks', 0) or 0
 
-                    semester = int(row.get('Semester', 1)) if pd.notna(row.get('Semester')) else 1
+                    sem_val = resolve_marks(row, 'Semester')
+                    semester = int(sem_val) if sem_val is not None and pd.notna(sem_val) else 1
 
                     marks_obj, _ = Marks.objects.get_or_create(
                         student=student,
@@ -1516,48 +1738,54 @@ def upload_excel_view(request):
                         semester=semester
                     )
 
-                    marks_obj.unit_1_marks = get_validated_mark('Unit 1', u1_m)
-                    marks_obj.unit_2_marks = get_validated_mark('Unit 2', u2_m)
-                    marks_obj.unit_3_marks = get_validated_mark('Unit 3', u3_m)
-                    marks_obj.unit_4_marks = get_validated_mark('Unit 4', u4_m)
+                    marks_obj.unit_1_marks = get_validated_mark('Unit 1', 'Unit1', 'Unit 1 Marks', max_val=u1_m)
+                    marks_obj.unit_2_marks = get_validated_mark('Unit 2', 'Unit2', 'Unit 2 Marks', max_val=u2_m)
+                    marks_obj.unit_3_marks = get_validated_mark('Unit 3', 'Unit3', 'Unit 3 Marks', max_val=u3_m)
+                    marks_obj.unit_4_marks = get_validated_mark('Unit 4', 'Unit4', 'Unit 4 Marks', max_val=u4_m)
 
-                    marks_obj.practical_marks = get_validated_mark('Practical', pr_m)
-                    marks_obj.internal_marks = get_validated_mark('Internal', int_m)
-                    marks_obj.assignment_marks = get_validated_mark('Assignment', ass_m)
-                    marks_obj.presentation_marks = get_validated_mark('Presentation', pres_m)
+                    marks_obj.practical_marks = get_validated_mark('Practical', 'Practical Marks', 'Practical Score', max_val=pr_m)
+                    marks_obj.internal_marks = get_validated_mark('Internal', 'Internal Marks', max_val=int_m)
+                    marks_obj.assignment_marks = get_validated_mark('Assignment', 'Assignment Marks', max_val=ass_m)
+                    marks_obj.presentation_marks = get_validated_mark('Presentation', 'Presentation Marks', max_val=pres_m)
 
                     marks_obj.excel_batch = excel_batch
                     marks_obj.save()
 
-                student_lookup = {s.roll_number: s for s in Student.objects.all()}
+                # FIX: keyed by exact roll_number before, same
+                # case/whitespace-mismatch risk as the Subject lookup above.
+                student_lookup = {_normalize_key(s.roll_number): s for s in Student.objects.all()}
 
                 df_att = pd.read_excel(xls, sheet_names[2])
+                resolve_att = _make_column_resolver(df_att)
 
                 for _, row in df_att.iterrows():
-                    roll = str(row.get('Roll Number', '') or row.get('Roll No', '')).strip()
-                    subj_name = str(row.get('Subject Name', '') or row.get('Subject', '')).strip()
-                    if not roll or not subj_name or pd.isna(roll) or pd.isna(subj_name):
+                    roll = str(resolve_att(row, 'Roll Number', 'Roll No') or '').strip()
+                    subj_name = str(resolve_att(row, 'Subject Name', 'Subject') or '').strip()
+                    if not roll or not subj_name or roll.lower() == 'nan' or subj_name.lower() == 'nan':
                         continue
 
-                    student = student_lookup.get(roll)
+                    norm_roll_key = _normalize_key(roll)
+                    student = student_lookup.get(norm_roll_key)
                     if not student:
-                        student, _ = Student.objects.get_or_create(
-                            roll_number=roll,
-                            defaults={'name': str(row.get('Name', roll)).strip(), 'created_in_batch': excel_batch}
+                        student, _ = get_or_create_student_ci(
+                            roll,
+                            str(resolve_att(row, 'Name', 'Student Name') or roll),
+                            extra_defaults={'created_in_batch': excel_batch}
                         )
-                        student_lookup[roll] = student
+                        student_lookup[norm_roll_key] = student
 
-                    subject = subject_lookup.get(subj_name)
+                    norm_subj_key = _normalize_key(subj_name)
+                    subject = subject_lookup.get(norm_subj_key)
                     if not subject:
-                        subject = Subject.objects.create(name=subj_name)
-                        subject_lookup[subj_name] = subject
+                        subject = get_or_create_subject_ci(subj_name)
+                        subject_lookup[norm_subj_key] = subject
 
                     sem = int(row.get('Semester', 1)) if pd.notna(row.get('Semester')) else 1
 
-                    th_att = clean_val(row.get('Theory Attended', 0)) or 0
-                    th_tot = clean_val(row.get('Theory Total', 0)) or 0
-                    pr_att = clean_val(row.get('Practical Attended', 0)) or 0
-                    pr_tot = clean_val(row.get('Practical Total', 0)) or 0
+                    th_att = clean_val(resolve_att(row, 'Theory Attended')) or 0
+                    th_tot = clean_val(resolve_att(row, 'Theory Total')) or 0
+                    pr_att = clean_val(resolve_att(row, 'Practical Attended')) or 0
+                    pr_tot = clean_val(resolve_att(row, 'Practical Total')) or 0
 
                     SubjectAttendance.objects.update_or_create(
                         student=student,

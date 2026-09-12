@@ -67,9 +67,47 @@
         .badge-risk-success { background: rgba(16, 185, 129, 0.2); color: #6EE7B7; border: 1px solid rgba(16, 185, 129, 0.4); }
 
         .card-glass .form-label { margin-bottom: .25rem; color: var(--muted-contrast); }
-
-        .filters-row .form-label { margin-bottom:.25rem; }
+.filters-row .form-label { margin-bottom:.25rem; }
         .filters-row .form-select { height: calc(2.25rem + 6px); }
+        .action-plan-box {
+            max-height: 75px;
+            overflow-y: auto;
+            font-size: 0.8rem;
+            line-height: 1.35;
+            color: #f59e0b;
+            padding-right: 4px;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(245, 158, 11, 0.4) transparent;
+        }
+
+        .action-plan-box::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .action-plan-box::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .action-plan-box::-webkit-scrollbar-thumb {
+            background: rgba(245, 158, 11, 0.4);
+            border-radius: 4px;
+        }
+
+        .action-plan-box::-webkit-scrollbar-thumb:hover {
+            background: rgba(245, 158, 11, 0.7);
+        }
+
+        /* Mobile & Table Auto-Layout Fix */
+        .table-custom-fix {
+            table-layout: auto !important;
+            width: 100% !important;
+        }
+
+        .table-custom-fix th, 
+        .table-custom-fix td {
+            padding: 0.65rem 0.5rem !important;
+            white-space: nowrap;
+        }
 
         .better-contrast, .text-muted { color: var(--muted-contrast) !important; }
         .table.table-dark .text-muted { color: var(--muted-contrast) !important; }
@@ -86,12 +124,28 @@
             line-height: 1.35;
             padding-right: 4px;
         }
-        .action-plan-scroll::-webkit-scrollbar {
-            width: 4px;
+        /* Custom Dark Scrollbars for Entire Dashboard */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
         }
-        .action-plan-scroll::-webkit-scrollbar-thumb {
-            background: rgba(245, 158, 11, 0.4);
-            border-radius: 4px;
+
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4);
         }
 
         .btn-segment {
@@ -154,7 +208,12 @@
             .metric-value { font-size: 1.4rem !important; }
             .metric-subtext { font-size: 0.72rem !important; }
             .card-glass, .ai-terminal { padding: 1rem !important; }
+            .action-plan-box {
+                max-height: 60px;
+                font-size: 0.75rem;
+            }
         }
+        
 
         @media print {
             @page {
@@ -310,25 +369,38 @@
 
     {% if is_student_mode %}
     <!-- MODE 1: SINGLE-STUDENT 360° DOSSIER -->
-    <div class="alert alert-info border-0 bg-primary text-white p-3 rounded-3 mb-3 mb-md-4 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
-        <div>
-            <h4 class="fw-bold mb-1 fs-5 fs-md-4">
-                <i class="fa-solid fa-user-check me-2"></i>Parent-Teacher Meeting Dossier:
-                {% if student.name %}
-                    {{ student.name|title }}
-                {% elif student.user %}
-                    {{ student.user.get_full_name|default:student.user.username|title }}
-                {% else %}
-                    Student #{{ student.id }}
-                {% endif %}
-            </h4>
-            <span class="small">Roll Number: <strong>{{ student.roll_number }}</strong> | Class: <strong>{{ student.get_year_display }}</strong></span>
-        </div>
-        <div class="d-flex gap-2 w-100 w-md-auto no-print">
-            <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold shadow-sm flex-fill flex-md-grow-0">
-                <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export PDF
-            </button>
-            <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light btn-sm fw-bold flex-fill flex-md-grow-0">← Back</a>
+    <!-- MODE 1: SINGLE-STUDENT 360° DOSSIER -->
+    <div class="card bg-primary text-white border-0 p-3 p-md-4 mb-3 mb-md-4 shadow-sm rounded-3">
+        <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
+            <div>
+                <h4 class="fw-bold mb-1 text-white d-flex align-items-center flex-wrap gap-2">
+                    <i class="fa-solid fa-user-check me-1"></i>
+                    <span>Parent-Teacher Meeting Dossier:</span>
+                    <span class="text-warning fw-extrabold">
+                        {% if student.name %}
+                            {{ student.name|title }}
+                        {% elif student.user %}
+                            {{ student.user.get_full_name|default:student.user.username|title }}
+                        {% else %}
+                            Student #{{ student.id }}
+                        {% endif %}
+                    </span>
+                </h4>
+                <div class="small text-white opacity-90 mt-1">
+                    Roll Number: <strong class="text-white">{{ student.roll_number }}</strong> 
+                    <span class="mx-2">|</span> 
+                    Class: <strong class="text-white">{{ student.get_year_display }}</strong>
+                </div>
+            </div>
+
+            <div class="d-flex align-items-center gap-2 no-print flex-shrink-0 mt-2 mt-md-0">
+                <button id="exportPdfBtn" onclick="exportDossierPDF()" class="btn btn-light btn-sm fw-bold px-3 py-2 shadow-sm d-inline-flex align-items-center">
+                    <i class="fa-solid fa-file-pdf me-1 text-danger"></i> Export PDF
+                </button>
+                <a href="{% url 'students:analytics_dashboard' %}" class="btn btn-outline-light btn-sm fw-bold px-3 py-2 d-inline-flex align-items-center">
+                    <i class="fa-solid fa-arrow-left me-1"></i> Back
+                </a>
+            </div>
         </div>
     </div>
 
@@ -398,9 +470,9 @@
 {% endif %}
 
     <div class="card-glass p-3 p-md-4 mb-3 mb-md-4 border-warning">
-        <div class="d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2 mb-2">
+        <div class="d-flex align-items-center justify-content-between mb-2">
             <h5 class="fw-bold text-warning mb-0 fs-6 fs-md-5"><i class="fa-solid fa-comment-sms me-2"></i>Auto-Generated Parent Notice Synthesizer</h5>
-            <button id="copyNoticeBtn" class="btn btn-sm btn-outline-warning no-print w-100 w-sm-auto" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
+            <button id="copyNoticeBtn" class="btn btn-sm btn-outline-warning no-print" onclick="navigator.clipboard.writeText(document.getElementById('noticeText').innerText); alert('Notice copied to clipboard!');">
                 <i class="fa-solid fa-copy me-1"></i> Copy Text
             </button>
         </div>
@@ -432,7 +504,7 @@
                     <tr>
                         <td class="fw-bold text-white fs-6 text-nowrap">{{ item.subject }}</td>
                         <td class="fw-bold text-info">{{ item.marks.semester_exam_display }}</td>
-                        <td class="fw-bold text-white text-nowrap">{{ item.marks.total_marks|default:0 }} / {{ item.subject.total_max_marks|default:100 }}</td>
+                        <td class="fw-bold text-white text-nowrap">{{ item.marks.total_marks|default:0 }} / {{ item.marks.subject.computed_total_max|default:0|floatformat:0 }}</td>
                         <td class="fw-bold text-primary fs-6">{{ item.percentage|default:0 }}%</td>
                         <td>
                             <span class="badge bg-primary px-2 py-1 fs-6">{{ item.marks.grade|default:"N/A" }}</span>
@@ -495,7 +567,7 @@
                         <td class="fw-bold text-white text-start fs-6 text-nowrap">{{ item.subject }}</td>
 
                         <td>
-                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_1_marks is None %}
+                            {% if item.marks.unit_1_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.unit_1_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -505,7 +577,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_2_marks is None %}
+                            {% if item.marks.unit_2_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.unit_2_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -515,7 +587,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_3_marks is None %}
+                            {% if item.marks.unit_3_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.unit_3_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -525,7 +597,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_theory_marks|default:0 == 0 or item.marks.unit_4_marks is None %}
+                            {% if item.marks.unit_4_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.unit_4_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -535,7 +607,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_internal_marks|default:0 == 0 or item.marks.internal_marks is None %}
+                            {% if item.marks.internal_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.internal_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -545,7 +617,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_assignment_marks|default:0 == 0 or item.marks.assignment_marks is None %}
+                            {% if item.marks.assignment_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.assignment_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -555,7 +627,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_presentation_marks|default:0 == 0 or item.marks.presentation_marks is None %}
+                            {% if item.marks.presentation_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.presentation_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -565,7 +637,7 @@
                         </td>
 
                         <td>
-                            {% if item.marks.subject.max_practical_marks|default:0 == 0 or item.marks.practical_marks is None %}
+                            {% if item.marks.practical_marks is None %}
                                 <span class="text-secondary small">N/A</span>
                             {% elif item.marks.practical_marks == 0 %}
                                 <span class="text-danger fw-bold">0</span>
@@ -774,23 +846,23 @@
     <div class="col-12 col-lg-6">
         <div class="card-glass p-3 p-md-4 h-100">
             <h5 class="fw-bold text-danger mb-3 fs-6 fs-md-5"><i class="fa-solid fa-triangle-exclamation me-2"></i>Bottom 5 Remedial Intervention Roster</h5>
-            <div class="table-responsive" style="overflow-x: hidden; width: 100%;">
-                <table class="table table-dark-custom mb-0" style="table-layout: fixed; width: 100%;">
+            <div class="table-responsive">
+                <table class="table table-dark-custom table-custom-fix mb-0">
                     <thead>
                         <tr class="text-white">
-                            <th style="width: 18%;">Roll No</th>
-                            <th style="width: 18%;">Name</th>
-                            <th style="width: 18%;">Class</th>
-                            <th style="width: 16%;">Attendance</th>
-                            <th style="width: 12%;">Failure Risk</th>
-                            <th style="width: 28%;">Action Plan</th>
+                            <th>Roll No</th>
+                            <th>Name</th>
+                            <th>Class</th>
+                            <th>Overall Mean</th>
+                            <th>Failure Risk</th>
+                            <th style="min-width: 180px;">Action Plan</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for bot in bottom_remedial_roster %}
+                       {% for bot in bottom_remedial_roster %}
                         <tr class="clickable-row" onclick="window.location='?student_id={{ bot.student.id }}'">
                             <td class="fw-bold align-middle">{{ bot.student.roll_number }}</td>
-                            <td class="align-middle" style="white-space: normal; word-wrap: break-word;">
+                            <td class="align-middle">
                                 {% if bot.student.name %}
                                     {{ bot.student.name|title }}
                                 {% elif bot.student.user %}
@@ -800,10 +872,10 @@
                                 {% endif %}
                             </td>
                             <td class="align-middle"><span class="badge bg-secondary">{{ bot.student.get_year_display }}</span></td>
-                            <td class="align-middle">{{ bot.attendance|default:0 }}%</td>
+                            <td class="align-middle"><span class="badge bg-danger fs-6">{{ bot.avg_marks|default:0 }}%</span></td>
                             <td class="align-middle"><span class="badge badge-risk-{{ bot.badge|default:'danger' }}">{{ bot.risk|default:0 }}%</span></td>
-                            <td class="align-middle">
-                              <div style="max-height: 80px; overflow-y: auto; font-size: 0.85rem; color: #f59e0b; padding-right: 4px;">
+                            <td class="align-middle" style="white-space: normal;">
+                              <div class="action-plan-box">
                                 {{ bot.remedial }}
                               </div>
                             </td>
@@ -816,7 +888,6 @@
             </div>
         </div>
     </div>
-    
 <!-- Complete Roster Header -->
 <div class="card-glass p-3 p-md-4 mb-3 mb-md-4">
     <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px;">
@@ -1067,7 +1138,7 @@
                         <tbody>
                             {% for batch in excel_batches|default:None %}
                             <tr>
-                                <td class="fw-semibold text-white"><i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.filename|default:batch.file_name }}</td>
+                                <td class="fw-semibold text-white"><i class="fa-solid fa-file-excel text-success me-2"></i>{{ batch.file.name }}</td>
                                 <td class="small text-light">
                                     {% if batch.uploaded_at %}
                                         {{ batch.uploaded_at|date:"Y-m-d" }}

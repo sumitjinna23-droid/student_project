@@ -58,9 +58,8 @@ def delete_user_by_email_when_teacher_deleted(sender, instance, **kwargs):
 def ensure_user_for_student(sender, instance, created, **kwargs):
     """
     When a new Student is created, ensure there is a linked Django User so
-    the student can log in. Temporary password = their (normalized,
-    uppercase) roll_number, matched by a lowercased username — students are
-    expected to change this via first_time_setup / password reset.
+    the student can log in. Uses an unusable password initially so that
+    first-time logins correctly trigger the password setup page[cite: 2].
 
     Only runs on creation (`created` guard) — NOT on every save — so
     routine updates (e.g. re-importing the same students from a new Excel
@@ -82,7 +81,7 @@ def ensure_user_for_student(sender, instance, created, **kwargs):
                 }
             )
             if u_created:
-                user.set_password(username_safe)
+                user.set_unusable_password()  # <-- Marks the account as password-less so first_time_setup triggers[cite: 2]
                 user.save()
 
             profile, _ = UserProfile.objects.get_or_create(user=user)

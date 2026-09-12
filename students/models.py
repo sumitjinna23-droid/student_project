@@ -285,12 +285,11 @@ class Student(models.Model):
 
 # =========================================================
 # 2. SUBJECT MODEL
-# =========================================================
 class Subject(models.Model):
     name = models.CharField(max_length=100, unique=True)
     subject_type = models.CharField(max_length=50, default='THEORY')
 
-    total_max_marks = models.FloatField(default=100.0)
+    total_max_marks = models.FloatField(default=0.0)
     max_theory_marks = models.FloatField(default=0.0)
     max_practical_marks = models.FloatField(default=0.0)
     max_internal_marks = models.FloatField(default=0.0)
@@ -304,6 +303,11 @@ class Subject(models.Model):
 
     @property
     def computed_total_max(self):
+        # 1. Prioritize the explicit 'Total Marks' column from the Excel sheet first
+        if self.total_max_marks and self.total_max_marks > 0:
+            return self.total_max_marks
+
+        # 2. Fallback to summing component marks if total_max_marks is 0 or unset
         sub_total = (
             (self.max_theory_marks or 0.0) +
             (self.max_practical_marks or 0.0) +
@@ -311,7 +315,17 @@ class Subject(models.Model):
             (self.max_assignment_marks or 0.0) +
             (self.max_presentation_marks or 0.0)
         )
-        return sub_total if sub_total > 0 else (self.total_max_marks or 100.0)
+        if sub_total > 0:
+            return sub_total
+
+        # 3. Last-resort fallback if all fields are 0
+        logger.warning(
+            "Subject '%s' (id=%s) has no configured max marks in any "
+            "field; falling back to a default of 100.0. Check the "
+            "Subjects sheet column headers for this subject.",
+            self.name, self.pk,
+        )
+        return 100.0
 
     @property
     def is_practical_only(self):
@@ -319,7 +333,6 @@ class Subject(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.subject_type})"
-
 
 # =========================================================
 # 3. MARKS MODEL
@@ -566,39 +579,47 @@ class AllowedTeacher(models.Model):
 # =========================================================
 # 8. EXCEL FILE HISTORY & BATCH TRACKING MODEL
 # =========================================================
+def get_pure_filename(instance, filename):
+    return os.path.basename(filename)
+
 class ExcelBatch(models.Model):
     filename = models.CharField(max_length=255)
-    file = models.FileField(upload_to='excel_batches/', null=True, blank=True)
+    file = models.FileField(upload_to=get_pure_filename, null=True, blank=True)
     academic_year = models.CharField(max_length=50, blank=True, null=True)
     uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     uploaded_at = models.DateTimeField(auto_now_add=True)
     record_count = models.IntegerField(null=True, blank=True)
 
+    @property
+    def clean_filename(self):
+        if self.file and self.file.name:
+            return os.path.basename(self.file.name)
+        if self.filename and self.filename.strip():
+            return os.path.basename(self.filename)
+        return "Unnamed Workbook"
+
     def delete_associated_records(self):
         with transaction.atomic():
-            # 1. Fetch all students created in this batch
             batch_students = Student.objects.filter(created_in_batch=self)
-
-            # 2. Explicitly remove associated User profiles and Django Users
             for student in batch_students:
-                # Resolve linked UserProfile
                 profile = getattr(student, 'user_account', None)
-                user = profile.user if profile else User.objects.filter(username__iexact=student.roll_number).first()
-                
-                if profile:
-                    profile.delete()
-                if user:
-                    user.delete()
+                if profile and profile.user_id:
+                    user = profile.user
+                    if user and user.pk:
+                        user.delete()
+                else:
+                    user = User.objects.filter(username__iexact=student.roll_number).first()
+                    if user and user.pk:
+                        user.delete()
 
-            # 3. Clean up performance records and students
             Marks.objects.filter(excel_batch=self).delete()
             SubjectAttendance.objects.filter(excel_batch=self).delete()
             batch_students.delete()
 
-            # 4. Remove physical file if present
-            if self.file and os.path.isfile(self.file.path):
+            if self.file:
                 try:
-                    os.remove(self.file.path)
+                    if os.path.isfile(self.file.path):
+                        os.remove(self.file.path)
                 except Exception:
                     pass
 
@@ -629,4 +650,3 @@ def cleanup_user_on_teacher_delete(sender, instance, **kwargs):
         user = User.objects.filter(email__iexact=instance.email).first()
         if user:
             user.delete()
-

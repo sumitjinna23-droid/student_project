@@ -76,7 +76,13 @@
                             {% for batch in excel_batches %}
                                 <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
                                     <td class="py-3 px-3 text-slate-300">{{ batch.id }}</td>
-                                    <td class="py-3 px-3"><strong class="text-white">{{ batch.filename }}</strong></td>
+                                   
+                                    <td class="py-3 px-3">
+                                   <strong class="text-white">
+                                    {{ batch.file.name|cut:"excel_batches/"|default:batch.filename }}
+                                    </strong>
+                                     </td>
+                                     
                                     <td class="py-3 px-3 text-slate-300">{{ batch.academic_year|default:"All Years" }}</td>
                                     <td class="py-3 px-3 text-slate-300">{{ batch.uploaded_at|date:"M d, Y H:i" }}</td>
                                     <td class="py-3 px-3 text-right">
