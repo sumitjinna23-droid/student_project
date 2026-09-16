@@ -1,3 +1,4 @@
+#git commit -m "Final working version before exams"
 # students/views.py
 import re
 import pandas as pd
@@ -168,12 +169,27 @@ def analyze_student_performance(marks_obj, overall_att=100.0):
         min_score = min(unit_percentages.values())
         max_score = max(unit_percentages.values())
 
-        if min_score == max_score and min_score == 100.0:
-            weakest_unit_str = "None"
-            strongest_unit_str = ", ".join([u for u, p in unit_percentages.items()])
-        elif min_score == max_score:
-            weakest_unit_str = "None"
-            strongest_unit_str = ", ".join([u for u, p in unit_percentages.items()])
+        if min_score == max_score:
+            tied_units_str = ", ".join([u for u, p in unit_percentages.items()])
+
+            # FIX (all-zero / flat-line edge case): a tie at the TOP
+            # (100%) means there's no weakness to report, so weakest is
+            # "None" and every unit is strongest. A tie at the BOTTOM
+            # (0%) is the mirror image — there's no strength to report,
+            # so strongest is "None" and every unit is weakest. Any
+            # other flat tie (e.g. all units at 50%) has no unique
+            # standout on either side, so both fields show the tied set.
+            if min_score == 100.0:
+                weakest_unit_str = "None"
+                strongest_unit_str = tied_units_str
+            elif min_score == 0.0:
+                weakest_unit_str = tied_units_str
+                strongest_unit_str = "None"
+                min_score_val = min_score
+            else:
+                weakest_unit_str = tied_units_str
+                strongest_unit_str = tied_units_str
+                min_score_val = min_score
         else:
             weak_units = [u for u, p in unit_percentages.items() if p == min_score]
             strong_units = [u for u, p in unit_percentages.items() if p == max_score]
